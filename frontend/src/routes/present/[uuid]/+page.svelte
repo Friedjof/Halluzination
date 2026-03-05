@@ -6,6 +6,7 @@
   import { api } from '$lib/api';
   import QRCode from 'qrcode';
   import type { Game } from '$lib/types';
+  import ImageCompareSlider from '$lib/components/ImageCompareSlider.svelte';
 
   const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
   $: uuid = $page.params.uuid;
@@ -223,16 +224,7 @@
 
   {:else if phase === 'revealed'}
     <div class="reveal-area">
-      <div class="images-compare">
-        <div class="img-col">
-          <span class="img-label">KI-Version</span>
-          <img src={aiImageUrl} alt="KI" />
-        </div>
-        <div class="img-col">
-          <span class="img-label">Original</span>
-          <img src={originalUrl} alt="Original" />
-        </div>
-      </div>
+      <ImageCompareSlider aiUrl={aiImageUrl} originalUrl={originalUrl} />
       {#if solutionText || targetYear || correctLocation}
         <div class="solution">
           {#if solutionText}<p>{solutionText}</p>{/if}
@@ -496,35 +488,6 @@
     flex-direction: column;
     align-items: center;
     gap: 1.25rem;
-  }
-
-  .images-compare {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    width: 100%;
-  }
-
-  .img-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .img-label {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: rgba(255,255,255,0.45);
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    text-align: center;
-  }
-
-  .img-col img {
-    width: 100%;
-    aspect-ratio: 16/9;
-    object-fit: cover;
-    border-radius: 12px;
   }
 
   .solution {
