@@ -7,7 +7,7 @@
   $: uuid = $page.params.uuid;
 
   type Phase =
-    | 'join' | 'lobby' | 'waiting' | 'buzzed'
+    | 'join' | 'lobby' | 'waiting' | 'waiting_next' | 'buzzed'
     | 'other_buzzed' | 'locked' | 'quiz' | 'quiz_done'
     | 'result' | 'ended' | 'kicked';
 
@@ -153,7 +153,7 @@
     });
 
     socket.on('unlock_all', () => {
-      if (phase !== 'quiz' && phase !== 'quiz_done' && phase !== 'result') {
+      if (phase === 'other_buzzed' || phase === 'locked' || phase === 'buzzed') {
         phase = 'waiting';
       }
     });
@@ -204,10 +204,11 @@
     });
 
     socket.on('round_end', () => {
-      if (phase !== 'result') phase = 'lobby';
+      if (phase !== 'result') phase = 'waiting_next';
     });
 
-    socket.on('game_end', () => {
+    socket.on('game_end', (data) => {
+      if (data?.leaderboard?.length) leaderboard = data.leaderboard;
       phase = 'ended';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
     });
@@ -423,6 +424,14 @@
       <span class="big-emoji">🚫</span>
       <p class="state-title">Entfernt</p>
       <p class="hint">Du wurdest vom Spielleiter aus dem Spiel entfernt.</p>
+    </div>
+
+  <!-- ── WAITING NEXT ROUND ── -->
+  {:else if phase === 'waiting_next'}
+    <div class="card center">
+      <span class="big-emoji">⏳</span>
+      <p class="state-title">Runde vorbei</p>
+      <p class="hint">Warte auf die nächste Runde…</p>
     </div>
 
   <!-- ── ENDED ── -->

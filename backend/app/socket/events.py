@@ -228,24 +228,6 @@ async def handle_lobby_ready(sid, data):
     await _emit_participants_update(game_uuid)
 
 
-@sio.on("reconnect")
-async def handle_reconnect(sid, data):
-    """Re-attach a participant after connection loss. data: {game_uuid, participant_id}"""
-    game_uuid = data.get("game_uuid")
-    participant_id = data.get("participant_id")
-    if not game_uuid or not participant_id:
-        return
-
-    await sio.enter_room(sid, f"game:{game_uuid}")
-    await set_participant_sid(game_uuid, int(participant_id), sid)
-
-    current_round_id = await get_game_state_field(game_uuid, "current_round_id")
-    await sio.emit(
-        "reconnected",
-        {"game_uuid": game_uuid, "participant_id": participant_id, "current_round_id": current_round_id},
-        to=sid,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Buzzer
@@ -564,13 +546,23 @@ async def _handle_end_game(game_uuid: str):
             game.status = GameStatus.lobby
             await db.commit()
 
+        participants_result = await db.execute(
+            select(Participant)
+            .where(Participant.game_uuid == game_uuid)
+            .order_by(Participant.score.desc())
+        )
+        final_leaderboard = [
+            {"participant_id": p.id, "username": p.username, "score": p.score}
+            for p in participants_result.scalars().all()
+        ]
+
     await clear_game_state(game_uuid)
     await clear_lobby_ready(game_uuid)
     await unlock_all_participants(game_uuid)
     for rid in round_ids:
         await clear_buzzer(game_uuid, rid)
 
-    await sio.emit("game_end", {}, room=f"game:{game_uuid}")
+    await sio.emit("game_end", {"leaderboard": final_leaderboard}, room=f"game:{game_uuid}")
 
 
 # ---------------------------------------------------------------------------
@@ -606,8 +598,11 @@ async def handle_quiz_answer(sid, data):
 
 
 async def _close_quiz_after(game_uuid: str, round_id: int, delay: int):
-    await asyncio.sleep(delay)
-    await _finalize_quiz(game_uuid, round_id)
+    try:
+        await asyncio.sleep(delay)
+        await _finalize_quiz(game_uuid, round_id)
+    except asyncio.CancelledError:
+        pass
 
 
 async def _finalize_quiz(game_uuid: str, round_id: int):
