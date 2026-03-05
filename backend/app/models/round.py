@@ -12,8 +12,8 @@ class Round(Base):
     original_url: Mapped[str] = mapped_column(String(500))
     ai_url: Mapped[str] = mapped_column(String(500))
     solution_text: Mapped[str] = mapped_column(Text)
-    target_year: Mapped[int] = mapped_column(Integer)
-    time_limit: Mapped[int] = mapped_column(Integer, default=10)
+    target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    time_limit: Mapped[int] = mapped_column(Integer, default=20)
     position: Mapped[int] = mapped_column(Integer, default=0)
 
     game: Mapped["Game"] = relationship(back_populates="rounds")

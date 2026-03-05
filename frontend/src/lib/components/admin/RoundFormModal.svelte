@@ -14,10 +14,11 @@
   // Form state
   let solutionText = round?.solution_text ?? '';
   let targetYear: number | '' = round?.target_year ?? '';
-  let timeLimit = round?.time_limit ?? 10;
+  let timeLimit = round?.time_limit ?? 20;
 
   // Locations
-  let locations: { name: string; is_correct: boolean }[] = round?.locations.length === 4
+  let useLocations = (round?.locations.length ?? 0) > 0;
+  let locations: { name: string; is_correct: boolean }[] = round?.locations && round.locations.length > 0
     ? round.locations.map((l) => ({ name: l.name, is_correct: l.is_correct }))
     : [
         { name: '', is_correct: true },
@@ -46,13 +47,12 @@
     locations = locations.map((l, idx) => ({ ...l, is_correct: idx === i }));
   }
 
+  $: yearValid = targetYear === '' || (Number(targetYear) > 1800 && Number(targetYear) <= new Date().getFullYear() + 1);
+  $: locationsValid = !useLocations || (locations.every((l) => l.name.trim() !== '') && locations.some((l) => l.is_correct));
   $: isValid =
     solutionText.trim() !== '' &&
-    targetYear !== '' &&
-    Number(targetYear) > 1800 &&
-    Number(targetYear) <= new Date().getFullYear() + 1 &&
-    locations.every((l) => l.name.trim() !== '') &&
-    locations.some((l) => l.is_correct) &&
+    yearValid &&
+    locationsValid &&
     (round !== null || (!!originalFile && !!aiFile));  // images required only for new rounds
 
   async function save() {
@@ -64,20 +64,16 @@
     try {
       let savedRound: Round;
 
+      const roundData: Record<string, unknown> = {
+        solution_text: solutionText.trim(),
+        time_limit: timeLimit,
+        ...(targetYear !== '' ? { target_year: Number(targetYear) } : { target_year: null }),
+      };
+
       if (round === null) {
-        // Create new round
-        savedRound = await api.post(`/api/games/${gameUuid}/rounds`, {
-          solution_text: solutionText.trim(),
-          target_year: Number(targetYear),
-          time_limit: timeLimit,
-        });
+        savedRound = await api.post(`/api/games/${gameUuid}/rounds`, roundData);
       } else {
-        // Update existing round
-        savedRound = await api.patch(`/api/games/${gameUuid}/rounds/${round.id}`, {
-          solution_text: solutionText.trim(),
-          target_year: Number(targetYear),
-          time_limit: timeLimit,
-        });
+        savedRound = await api.patch(`/api/games/${gameUuid}/rounds/${round.id}`, roundData);
       }
 
       // Upload images if new files are provided
@@ -99,18 +95,25 @@
         }
       }
 
-      // Create or update locations
-      if (round === null) {
-        await api.post(`/api/rounds/${savedRound.id}/locations`, {
-          locations: locations.map((l) => ({ name: l.name.trim(), is_correct: l.is_correct })),
-        });
-      } else {
-        for (let i = 0; i < round.locations.length; i++) {
-          await api.patch(`/api/rounds/${round.id}/locations/${round.locations[i].id}`, {
-            name: locations[i].name.trim(),
-            is_correct: locations[i].is_correct,
+      // Handle locations
+      if (useLocations) {
+        if (round === null || round.locations.length === 0) {
+          // New round or round had no locations: create them
+          await api.post(`/api/rounds/${savedRound.id}/locations`, {
+            locations: locations.map((l) => ({ name: l.name.trim(), is_correct: l.is_correct })),
           });
+        } else {
+          // Existing locations: update each one
+          for (let i = 0; i < round.locations.length; i++) {
+            await api.patch(`/api/rounds/${round.id}/locations/${round.locations[i].id}`, {
+              name: locations[i].name.trim(),
+              is_correct: locations[i].is_correct,
+            });
+          }
         }
+      } else if (round !== null && round.locations.length > 0) {
+        // User removed locations from an existing round
+        await api.delete(`/api/rounds/${round.id}/locations`);
       }
 
       // Reload full round data from server
@@ -170,13 +173,14 @@
         </label>
 
         <label>
-          Jahr <span class="req">*</span>
+          Jahr <span class="opt">(optional)</span>
           <input
             type="number"
             bind:value={targetYear}
             min="1800"
             max={new Date().getFullYear() + 1}
             placeholder="z.B. 2019"
+            class:invalid={!yearValid && targetYear !== ''}
           />
         </label>
 
@@ -188,33 +192,46 @@
       </div>
 
       <!-- Locations -->
-      <fieldset class="locations">
-        <legend>Locations <span class="req">*</span></legend>
-        <div class="loc-grid">
-          {#each locations as loc, i}
-            <div class="loc-row">
-              <input
-                type="radio"
-                name="correct"
-                checked={loc.is_correct}
-                on:change={() => setCorrect(i)}
-                id="loc-{i}"
-                title="Als richtige Antwort markieren"
-              />
-              <input
-                type="text"
-                bind:value={loc.name}
-                placeholder="Location {i + 1}"
-                class:correct={loc.is_correct}
-              />
-              <label for="loc-{i}" class="radio-label" title="Richtige Antwort">
-                {loc.is_correct ? '✅' : '○'}
-              </label>
-            </div>
-          {/each}
-        </div>
-        <p class="loc-hint">Wähle per Klick auf den Radio-Button die richtige Location aus.</p>
+      <fieldset class="locations" class:disabled={!useLocations}>
+        <legend>
+          <label class="toggle-label">
+            <input type="checkbox" bind:checked={useLocations} />
+            Ortswahl <span class="opt">(optional)</span>
+          </label>
+        </legend>
+        {#if useLocations}
+          <div class="loc-grid">
+            {#each locations as loc, i}
+              <div class="loc-row">
+                <input
+                  type="radio"
+                  name="correct"
+                  checked={loc.is_correct}
+                  on:change={() => setCorrect(i)}
+                  id="loc-{i}"
+                  title="Als richtige Antwort markieren"
+                />
+                <input
+                  type="text"
+                  bind:value={loc.name}
+                  placeholder="Location {i + 1}"
+                  class:correct={loc.is_correct}
+                />
+                <label for="loc-{i}" class="radio-label" title="Richtige Antwort">
+                  {loc.is_correct ? '✅' : '○'}
+                </label>
+              </div>
+            {/each}
+          </div>
+          <p class="loc-hint">Wähle per Klick auf den Radio-Button die richtige Location aus.</p>
+        {:else}
+          <p class="loc-hint skip-hint">Keine Ortswahl – Teilnehmer sehen keine Auswahl.</p>
+        {/if}
       </fieldset>
+
+      {#if !useLocations && targetYear === ''}
+        <p class="quiz-skip-info">ℹ️ Weder Ortswahl noch Jahr angegeben – die Fragerunde wird für diese Runde übersprungen.</p>
+      {/if}
 
       {#if generalError}
         <p class="error">{generalError}</p>
@@ -331,6 +348,7 @@
     color: #444;
   }
   .req { color: #dc3545; }
+  .opt { color: #888; font-weight: 400; font-size: 0.78rem; }
 
   input[type="text"], input[type="number"] {
     border: 1.5px solid #d0d5dd;
@@ -384,6 +402,31 @@
   .radio-label { font-size: 1rem; cursor: pointer; }
 
   .loc-hint { font-size: 0.72rem; color: #888; margin-top: 0.5rem; font-weight: 400; }
+  .skip-hint { font-style: italic; }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #444;
+  }
+  .toggle-label input[type="checkbox"] { cursor: pointer; accent-color: #0066cc; }
+
+  .locations.disabled { opacity: 0.7; }
+
+  .quiz-skip-info {
+    font-size: 0.82rem;
+    color: #555;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+  }
+
+  input.invalid { border-color: #dc3545; }
 
   .modal-footer {
     display: flex;

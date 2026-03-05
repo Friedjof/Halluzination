@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import time
 
 from sqlalchemy import and_, delete as sa_delete, or_, select, func
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
@@ -131,6 +134,7 @@ async def handle_join_game(sid, data):
                 response["current_round_id"] = r.id
                 response["ai_image_url"] = r.ai_url
 
+    logger.info("join_game game=%s participant_id=%s", game_uuid, participant_id)
     await sio.emit("joined", response, to=sid)
 
     # Broadcast the updated full participant list to the whole game room.
@@ -240,17 +244,27 @@ async def handle_buzz(sid, data):
     participant_id = int(data.get("participant_id", 0))
     round_id = int(data.get("round_id", 0))
 
+    # Validate participant exists and belongs to this game
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Participant).where(
+                Participant.id == participant_id,
+                Participant.game_uuid == game_uuid,
+            )
+        )
+        participant = result.scalar_one_or_none()
+        if not participant:
+            return
+        username = participant.username
+
     if await is_locked(game_uuid, participant_id):
         return
 
     won = await try_lock_buzzer(game_uuid, round_id, participant_id)
     if not won:
+        logger.debug("buzz lost game=%s round=%s participant=%s", game_uuid, round_id, participant_id)
         return
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Participant).where(Participant.id == participant_id))
-        participant = result.scalar_one_or_none()
-        username = participant.username if participant else "Unknown"
+    logger.info("buzz won game=%s round=%s participant=%s", game_uuid, round_id, participant_id)
 
     await sio.emit("buzz_confirmed", {"participant_id": participant_id}, to=sid)
     await sio.emit(
@@ -301,6 +315,8 @@ async def handle_admin_action(sid, data):
         await _handle_skip(game_uuid, round_id)
     elif action == "kick":
         await _handle_kick(game_uuid, participant_id)
+    elif action == "set_score":
+        await _handle_set_score(game_uuid, participant_id, data.get("score"))
     elif action == "reset_game":
         await _handle_reset_game(game_uuid)
     elif action == "end_game":
@@ -308,13 +324,12 @@ async def handle_admin_action(sid, data):
 
 
 async def _handle_correct(game_uuid: str, round_id: int, participant_id: int):
+    logger.info("correct game=%s round=%s participant=%s", game_uuid, round_id, participant_id)
+    # Fetch data first without committing score yet
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Participant).where(Participant.id == participant_id))
-        participant = result.scalar_one_or_none()
-        if not participant:
+        if not result.scalar_one_or_none():
             return
-        participant.score += 2
-        await db.commit()
 
         round_result = await db.execute(
             select(Round).options(selectinload(Round.locations)).where(Round.id == round_id)
@@ -325,6 +340,24 @@ async def _handle_correct(game_uuid: str, round_id: int, participant_id: int):
 
         locations = [{"id": l.id, "name": l.name} for l in r.locations]
 
+    has_quiz = bool(r.locations) or r.target_year is not None
+
+    # Persist the score (+2 for correct buzzer)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Participant).where(Participant.id == participant_id))
+        participant = result.scalar_one_or_none()
+        if participant:
+            participant.score += 2
+            await db.commit()
+
+    if not has_quiz:
+        # No quiz configured – award points and reveal immediately
+        logger.info("no quiz configured for round=%s, revealing directly", round_id)
+        await _emit_participants_update(game_uuid)
+        await _handle_reveal(game_uuid, round_id)
+        return
+
+    # Set Redis state first so quiz is atomically "started" before score is persisted
     await set_game_state(
         game_uuid,
         buzzed_participant_id=participant_id,
@@ -346,6 +379,7 @@ async def _handle_correct(game_uuid: str, round_id: int, participant_id: int):
 
 
 async def _handle_wrong(game_uuid: str, round_id: int, participant_id: int):
+    logger.info("wrong game=%s round=%s participant=%s", game_uuid, round_id, participant_id)
     await lock_participant(game_uuid, participant_id)
     await clear_buzzer(game_uuid, round_id)
 
@@ -386,6 +420,7 @@ async def _handle_unlock_all(game_uuid: str, round_id: int | None):
 
 
 async def _handle_next_round(game_uuid: str):
+    logger.info("next_round game=%s", game_uuid)
     async with AsyncSessionLocal() as db:
         current_id = await get_game_state_field(game_uuid, "current_round_id")
 
@@ -428,8 +463,10 @@ async def _handle_next_round(game_uuid: str):
         next_round = result.scalar_one_or_none()
 
     if not next_round:
+        logger.info("no more rounds, ending game=%s", game_uuid)
         await sio.emit("game_end", {}, room=f"game:{game_uuid}")
         return
+    logger.info("starting round=%s game=%s", next_round.id, game_uuid)
 
     await unlock_all_participants(game_uuid)
     await clear_buzzer(game_uuid, next_round.id)
@@ -444,6 +481,11 @@ async def _handle_next_round(game_uuid: str):
 
 
 async def _handle_reveal(game_uuid: str, round_id: int):
+    key = f"{game_uuid}:{round_id}"
+    if key in _quiz_tasks:
+        _quiz_tasks[key].cancel()
+        _quiz_tasks.pop(key, None)
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(Round).options(selectinload(Round.locations)).where(Round.id == round_id)
@@ -474,6 +516,7 @@ async def _handle_skip(game_uuid: str, round_id: int):
 
 
 async def _handle_kick(game_uuid: str, participant_id: int):
+    logger.info("kick game=%s participant=%s", game_uuid, participant_id)
     participant_id = int(participant_id)
     p_sid = await get_participant_sid(game_uuid, participant_id)
     if p_sid:
@@ -493,7 +536,27 @@ async def _handle_kick(game_uuid: str, participant_id: int):
     await _emit_participants_update(game_uuid)
 
 
+async def _handle_set_score(game_uuid: str, participant_id: int, score) -> None:
+    if score is None:
+        return
+    logger.info("set_score game=%s participant=%s score=%s", game_uuid, participant_id, score)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Participant).where(
+                Participant.id == int(participant_id),
+                Participant.game_uuid == game_uuid,
+            )
+        )
+        participant = result.scalar_one_or_none()
+        if not participant:
+            return
+        participant.score = int(score)
+        await db.commit()
+    await _emit_participants_update(game_uuid)
+
+
 async def _handle_reset_game(game_uuid: str):
+    logger.info("reset_game game=%s", game_uuid)
     # Cancel any running quiz tasks for this game
     for key in list(_quiz_tasks.keys()):
         if key.startswith(f"{game_uuid}:"):
@@ -531,6 +594,7 @@ async def _handle_reset_game(game_uuid: str):
 
 
 async def _handle_end_game(game_uuid: str):
+    logger.info("end_game game=%s", game_uuid)
     for key in list(_quiz_tasks.keys()):
         if key.startswith(f"{game_uuid}:"):
             _quiz_tasks[key].cancel()
@@ -606,6 +670,7 @@ async def _close_quiz_after(game_uuid: str, round_id: int, delay: int):
 
 
 async def _finalize_quiz(game_uuid: str, round_id: int):
+    logger.info("finalize_quiz game=%s round=%s", game_uuid, round_id)
     async with AsyncSessionLocal() as db:
         responses_result = await db.execute(
             select(QuizResponse)
@@ -624,11 +689,12 @@ async def _finalize_quiz(game_uuid: str, round_id: int):
         correct_location = next((loc for loc in r.locations if loc.is_correct), None)
         correct_location_name = correct_location.name if correct_location else None
 
-        # Year scoring: closest guess wins (ties share the point)
+        # Year scoring: closest guess wins (ties share the point); skipped if no target_year
         year_diffs: dict[int, int] = {}
-        for resp in responses:
-            if resp.year_guess is not None:
-                year_diffs[resp.participant_id] = abs(resp.year_guess - r.target_year)
+        if r.target_year is not None:
+            for resp in responses:
+                if resp.year_guess is not None:
+                    year_diffs[resp.participant_id] = abs(resp.year_guess - r.target_year)
         min_diff = min(year_diffs.values()) if year_diffs else None
 
         answered_ids: set[int] = set()

@@ -1,5 +1,6 @@
 .PHONY: dev backend-dev frontend-dev backend frontend \
-        db-up db-wait db-upgrade db-migrate db-reset frontend-install check-env
+        db-up db-wait db-upgrade db-migrate db-reset frontend-install check-env \
+        release version
 
 # ---------------------------------------------------------------------------
 # Dev – alles auf einmal
@@ -70,3 +71,25 @@ frontend-install:
 
 check-env:
 	@test -f .env || (echo "" && echo "Fehler: .env nicht gefunden." && echo "Bitte zuerst ausführen: cp .env.example .env" && echo "" && exit 1)
+
+# ---------------------------------------------------------------------------
+# Release
+# ---------------------------------------------------------------------------
+
+release:
+	@test -n "$(v)" || (echo "Benutzung: make release v=v1.0" && exit 1)
+	@echo "Version: $(v)"
+	@git checkout main
+	@git pull origin main
+	@echo $(v) > version.txt
+	@git add version.txt
+	@git commit -m "Bump version to $(v)"
+	@git push origin main
+	@git tag $(v)
+	@git push origin $(v)
+	@echo "Tag $(v) gepusht – GitHub Action wird ausgelöst."
+
+version:
+	@TAG=$$(git describe --tags --abbrev=0) && \
+	echo $$TAG > version.txt && \
+	echo "version.txt → $$TAG"

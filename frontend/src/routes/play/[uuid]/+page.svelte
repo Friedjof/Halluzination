@@ -50,6 +50,15 @@
   let quizSubmitted = false;
   let lobbyReady = false;
 
+  // Connection state
+  let disconnected = false;
+
+  // Sound
+  function playBuzzer() {
+    const audio = new Audio('/buzzer.mp3');
+    audio.play().catch(() => {});
+  }
+
   // Result
   let myPoints = 0;
   let myScore = 0;
@@ -113,6 +122,9 @@
   }
 
   onMount(() => {
+    socket.on('connect', () => { disconnected = false; });
+    socket.on('disconnect', () => { disconnected = true; });
+
     socket.on('joined', (data) => {
       if (data.current_round_id) {
         currentRoundId = data.current_round_id;
@@ -134,6 +146,7 @@
     });
 
     socket.on('buzz_confirmed', () => {
+      playBuzzer();
       phase = 'buzzed';
     });
 
@@ -198,6 +211,10 @@
         myPoints = me.points_awarded;
         myScore = me.score;
         myLocationCorrect = me.location_correct;
+      } else {
+        myPoints = 0;
+        myScore = 0;
+        myLocationCorrect = false;
       }
       phase = 'result';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
@@ -246,6 +263,8 @@
 
   onDestroy(() => {
     if (quizTimer) clearInterval(quizTimer);
+    socket.off('connect');
+    socket.off('disconnect');
     socket.off('joined');
     socket.off('round_start');
     socket.off('buzz_confirmed');
@@ -266,6 +285,10 @@
 </script>
 
 <div class="screen">
+
+  {#if disconnected}
+    <div class="disconnect-banner">⚠ Verbindung unterbrochen – wird wiederhergestellt…</div>
+  {/if}
 
   {#if phase !== 'join' && username}
     <div class="username-badge">{username}</div>
@@ -811,6 +834,20 @@
   .lb-rank { color: rgba(255,255,255,0.35); width: 1.5rem; font-weight: 600; }
   .lb-name { flex: 1; }
   .lb-score { font-weight: 700; }
+
+  .disconnect-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #dc3545;
+    color: white;
+    text-align: center;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    z-index: 200;
+  }
 
   .username-badge {
     position: fixed;

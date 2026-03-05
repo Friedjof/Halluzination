@@ -9,7 +9,7 @@ export interface Round {
   original_url: string;
   ai_url: string;
   solution_text: string;
-  target_year: number;
+  target_year: number | null;
   time_limit: number;
   position: number;
   locations: Location[];

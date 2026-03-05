@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { socket } from '$lib/socket';
@@ -45,6 +45,11 @@
     return url.startsWith('http') ? url : `${BACKEND}${url}`;
   }
 
+  function playSound(src: string) {
+    const audio = new Audio(src);
+    audio.play().catch(() => {});
+  }
+
   function emit(act: string, extra: Record<string, unknown> = {}) {
     socket.emit('admin_action', { game_uuid: uuid, admin_token: $adminToken, action: act, ...extra });
   }
@@ -53,6 +58,7 @@
 
   function correct() {
     if (!buzzedParticipant || !currentRound) return;
+    playSound('/correct.mp3');
     setPlayerCardState(buzzedParticipant.id, 'correct');
     emit('correct', { participant_id: buzzedParticipant.id, round_id: currentRound.id });
     phase = 'quiz';
@@ -60,6 +66,7 @@
 
   function wrong() {
     if (!buzzedParticipant || !currentRound) return;
+    playSound('/wrong.mp3');
     setPlayerCardState(buzzedParticipant.id, 'wrong');
     emit('wrong', { participant_id: buzzedParticipant.id, round_id: currentRound.id });
     buzzedParticipant = null;
@@ -97,6 +104,31 @@
   function endGame() {
     emit('end_game');
     goto(`/admin/${uuid}`);
+  }
+
+  function focusInput(node: HTMLInputElement) {
+    tick().then(() => { node.focus(); node.select(); });
+  }
+
+  // Inline score editing
+  let editingScoreId: number | null = null;
+  let editingScoreValue = '';
+
+  function startEditScore(id: number, currentScore: number) {
+    editingScoreId = id;
+    editingScoreValue = String(currentScore);
+  }
+
+  function saveScore(id: number) {
+    const score = parseInt(editingScoreValue, 10);
+    if (!isNaN(score)) {
+      emit('set_score', { participant_id: id, score });
+    }
+    editingScoreId = null;
+  }
+
+  function cancelEditScore() {
+    editingScoreId = null;
   }
 
   function kickParticipant(id: number) {
@@ -267,7 +299,20 @@
                 <div class="score-row">
                   <span class="rank">{i + 1}.</span>
                   <span class="pname" class:ready={p.ready}>{p.username}</span>
-                  <span class="pts">{p.score} Pkt</span>
+                  {#if editingScoreId === p.id}
+                    <input
+                      class="score-input"
+                      type="number"
+                      bind:value={editingScoreValue}
+                      on:keydown={(e) => { if (e.key === 'Enter') saveScore(p.id); if (e.key === 'Escape') cancelEditScore(); }}
+                      on:blur={() => saveScore(p.id)}
+                      use:focusInput
+                    />
+                  {:else}
+                    <button class="pts-btn" title="Punkte bearbeiten" on:click={() => startEditScore(p.id, p.score)}>
+                      {p.score} Pkt ✏️
+                    </button>
+                  {/if}
                   <button class="kick-btn" title="Spieler entfernen" on:click={() => kickParticipant(p.id)}>✕</button>
                 </div>
               {/each}
@@ -553,6 +598,32 @@
   .pname { flex: 1; font-weight: 500; }
   .pname.ready { color: #28a745; font-weight: 700; }
   .pts { font-weight: 700; color: #0066cc; }
+
+  .pts-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #0066cc;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0.1rem 0.35rem;
+    white-space: nowrap;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .pts-btn:hover { background: #f0f6ff; border-color: #c0d8f8; }
+
+  .score-input {
+    width: 5rem;
+    border: 1.5px solid #0066cc;
+    border-radius: 6px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #0066cc;
+    text-align: right;
+    outline: none;
+  }
   .kick-btn {
     background: none;
     border: 1px solid #fecaca;

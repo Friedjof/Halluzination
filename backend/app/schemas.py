@@ -36,8 +36,8 @@ class LocationOut(BaseModel):
 
 class RoundCreate(BaseModel):
     solution_text: str
-    target_year: int
-    time_limit: int = 10
+    target_year: Optional[int] = None
+    time_limit: int = 20
     original_url: str = ""
     ai_url: str = ""
 
@@ -54,7 +54,7 @@ class RoundOut(BaseModel):
     original_url: str
     ai_url: str
     solution_text: str
-    target_year: int
+    target_year: Optional[int] = None
     time_limit: int
     position: int
     locations: list[LocationOut] = []

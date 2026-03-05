@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid as _uuid
 
@@ -16,6 +17,11 @@ from app.schemas import LocationOut, RoundCreate, RoundOut, RoundUpdate, UploadO
 router = APIRouter(prefix="/api/games", tags=["rounds"])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _write_file(path: str, content: bytes) -> None:
+    with open(path, "wb") as f:
+        f.write(content)
 
 
 async def _get_round_or_404(uuid: str, round_id: int, db: AsyncSession) -> Round:
@@ -84,8 +90,7 @@ async def upload_images(
         ext = os.path.splitext(file.filename or "")[1] or ".jpg"
         filename = f"{_uuid.uuid4().hex}_{label}{ext}"
         path = os.path.join(settings.upload_dir, filename)
-        with open(path, "wb") as f:
-            f.write(content)
+        await asyncio.to_thread(_write_file, path, content)
         return f"/uploads/{filename}"
 
     original_url = await _save(original, "original")
@@ -102,7 +107,7 @@ async def upload_images(
 async def update_round(uuid: str, round_id: int, body: RoundUpdate, db: AsyncSession = Depends(get_db)):
     r = await _get_round_or_404(uuid, round_id, db)
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(r, field, value)
     await db.commit()
     await db.refresh(r)
