@@ -1,0 +1,17 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.135.1",
+    "pydantic-settings>=2.13.1",
+    "python-multipart>=0.0.22",
+    "python-socketio>=5.16.1",
+    "redis>=7.2.1",
+    "slowapi>=0.1.9",
+    "sqlalchemy>=2.0.48",
+    "uvicorn[standard]>=0.41.0",
+]

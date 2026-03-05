@@ -1,0 +1,36 @@
+# --- Secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.python-version
+
+# --- Uploads (user content, never in git) ---
+backend/uploads/
+
+# --- Node ---
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.env
+frontend/.env.local
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Logs ---
+*.log

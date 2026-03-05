@@ -33,6 +33,27 @@ Genau wie eine KI Dinge erfindet, die nicht existieren, zeigt dieses Spiel Bilde
 | Reverse Proxy | Caddy 2 (automatisches HTTPS) |
 | Hosting | Docker Compose auf Debian-Server |
 
+## Datenbank lokal aufsetzen
+
+Docker muss installiert sein.
+
+```bash
+# PostgreSQL starten
+make db-up
+
+# Schema anlegen
+make db-upgrade
+
+# Schema zurücksetzen
+make db-reset
+
+# Neue Migration nach Modelländerung
+make db-migrate msg="beschreibung der änderung"
+
+# Direkter DB-Zugriff
+docker compose exec db psql -U halluzination -d halluzination
+```
+
 ## Entwicklungsphasen
 
 - **Phase 1** – Docker Setup, DB-Modelle, Auth, Upload, QR-Code, Beitreten
