@@ -40,7 +40,10 @@ async def list_participants(uuid: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Participant).where(Participant.game_uuid == uuid).order_by(Participant.score.desc())
     )
-    return [ParticipantOut(id=p.id, username=p.username, score=p.score) for p in result.scalars().all()]
+    return [
+        ParticipantOut(id=p.id, username=p.username, score=p.score, ready=False, locked=False)
+        for p in result.scalars().all()
+    ]
 
 
 @router.delete("/{uuid}/participants/{participant_id}", dependencies=[Depends(require_admin)])
@@ -68,4 +71,10 @@ async def update_score(uuid: str, participant_id: int, body: ScoreUpdate, db: As
         raise HTTPException(status_code=404, detail="Participant not found")
     participant.score = body.score
     await db.commit()
-    return ParticipantOut(id=participant.id, username=participant.username, score=participant.score)
+    return ParticipantOut(
+        id=participant.id,
+        username=participant.username,
+        score=participant.score,
+        ready=False,
+        locked=False,
+    )

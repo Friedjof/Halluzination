@@ -8,6 +8,7 @@ from app.deps import get_db, require_admin
 from app.models.game import Game, GameStatus
 from app.models.location import Location
 from app.models.round import Round
+from app.redis_client import clear_buzzer, clear_game_state, clear_lobby_ready, unlock_all_participants
 from app.schemas import GameCreate, GameDetail, GameOut, ParticipantOut, RoundOut, LocationOut
 
 router = APIRouter(prefix="/api/games", tags=["games"])
@@ -66,7 +67,7 @@ async def get_game(uuid: str, db: AsyncSession = Depends(get_db)):
             for r in game.rounds
         ],
         participants=[
-            ParticipantOut(id=p.id, username=p.username, score=p.score)
+            ParticipantOut(id=p.id, username=p.username, score=p.score, ready=False, locked=False)
             for p in game.participants
         ],
     )
@@ -82,6 +83,17 @@ async def start_game(uuid: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Game is not in lobby state")
     game.status = GameStatus.active
     await db.commit()
+
+    rounds_result = await db.execute(select(Round.id).where(Round.game_uuid == uuid))
+    round_ids = [row[0] for row in rounds_result.all()]
+
+    # Ensure a fresh runtime state for the first round of a new run.
+    await clear_game_state(uuid)
+    await clear_lobby_ready(uuid)
+    await unlock_all_participants(uuid)
+    for rid in round_ids:
+        await clear_buzzer(uuid, rid)
+
     return {"status": "active"}
 
 

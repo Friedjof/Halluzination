@@ -2,7 +2,7 @@ import os
 import uuid as _uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,6 +36,11 @@ async def create_round(uuid: str, body: RoundCreate, db: AsyncSession = Depends(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Game not found")
 
+    pos_result = await db.execute(
+        select(func.coalesce(func.max(Round.position), -1)).where(Round.game_uuid == uuid)
+    )
+    next_position = int(pos_result.scalar_one()) + 1
+
     r = Round(
         game_uuid=uuid,
         original_url=body.original_url,
@@ -43,6 +48,7 @@ async def create_round(uuid: str, body: RoundCreate, db: AsyncSession = Depends(
         solution_text=body.solution_text,
         target_year=body.target_year,
         time_limit=body.time_limit,
+        position=next_position,
     )
     db.add(r)
     await db.commit()

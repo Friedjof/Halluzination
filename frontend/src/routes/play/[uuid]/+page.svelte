@@ -116,7 +116,7 @@
     socket.on('joined', (data) => {
       if (data.current_round_id) {
         currentRoundId = data.current_round_id;
-        phase = 'waiting';
+        phase = data.locked ? 'locked' : 'waiting';
       } else {
         phase = 'lobby';
       }
@@ -140,7 +140,9 @@
     socket.on('lockout', (data) => {
       if (data.winner_name) {
         buzzerWinner = data.winner_name;
-        phase = 'other_buzzed';
+        if (phase !== 'locked') {
+          phase = 'other_buzzed';
+        }
       } else if (data.reason === 'wrong') {
         phase = 'locked';
       }
@@ -152,6 +154,18 @@
 
     socket.on('unlock_all', () => {
       if (phase !== 'quiz' && phase !== 'quiz_done' && phase !== 'result') {
+        phase = 'waiting';
+      }
+    });
+
+    socket.on('participants_update', (data: { participants: { id: number; locked?: boolean }[] }) => {
+      const me = data.participants.find((p) => p.id === participantId);
+      if (!me) return;
+      if (me.locked) {
+        if (phase === 'waiting' || phase === 'other_buzzed' || phase === 'locked') {
+          phase = 'locked';
+        }
+      } else if (phase === 'locked') {
         phase = 'waiting';
       }
     });
@@ -237,6 +251,7 @@
     socket.off('lockout');
     socket.off('unlock');
     socket.off('unlock_all');
+    socket.off('participants_update');
     socket.off('quiz_start');
     socket.off('quiz_result');
     socket.off('round_end');
@@ -306,26 +321,27 @@
 
   <!-- ── BUZZED (I won) ── -->
   {:else if phase === 'buzzed'}
-    <div class="card center pulse-gold">
-      <span class="big-emoji">🔔</span>
+    <div class="buzzer-screen">
+      <p class="round-hint">Du hast gebuzzert</p>
+      <button class="buzzer-btn locked" disabled>BUZZ!</button>
       <p class="state-title">Du bist dran!</p>
       <p class="hint">Der Spielleiter entscheidet…</p>
     </div>
 
   <!-- ── OTHER BUZZED ── -->
   {:else if phase === 'other_buzzed'}
-    <div class="card center">
-      <span class="big-emoji">🔔</span>
-      <p class="state-title"><strong>{buzzerWinner}</strong></p>
-      <p class="hint">hat gebuzzert</p>
+    <div class="buzzer-screen">
+      <p class="round-hint"><strong>{buzzerWinner}</strong> hat gebuzzert</p>
+      <button class="buzzer-btn locked" disabled>BUZZ!</button>
+      <p class="hint">Warte auf die Entscheidung des Spielleiters</p>
     </div>
 
   <!-- ── LOCKED ── -->
   {:else if phase === 'locked'}
-    <div class="card center">
-      <span class="big-emoji">🔒</span>
-      <p class="state-title">Gesperrt</p>
-      <p class="hint">Falsch – warte auf die nächste Runde</p>
+    <div class="buzzer-screen">
+      <p class="round-hint">Falsch gebuzzert</p>
+      <button class="buzzer-btn locked" disabled>BUZZ!</button>
+      <p class="hint">Für diese Runde gesperrt</p>
     </div>
 
   <!-- ── QUIZ ── -->
@@ -600,11 +616,30 @@
     touch-action: none;
   }
 
+  .buzzer-btn.locked,
+  .buzzer-btn:disabled {
+    background: radial-gradient(circle at 35% 35%, #9ca3af, #6b7280);
+    box-shadow:
+      0 8px 0 #4b5563,
+      0 12px 28px rgba(0,0,0,0.35);
+    cursor: not-allowed;
+    opacity: 0.95;
+    transform: none;
+  }
+
   .buzzer-btn:active {
     transform: translateY(6px);
     box-shadow:
       0 2px 0 #880000,
       0 4px 16px rgba(200,0,0,0.4);
+  }
+
+  .buzzer-btn.locked:active,
+  .buzzer-btn:disabled:active {
+    transform: none;
+    box-shadow:
+      0 8px 0 #4b5563,
+      0 12px 28px rgba(0,0,0,0.35);
   }
 
   /* Quiz */

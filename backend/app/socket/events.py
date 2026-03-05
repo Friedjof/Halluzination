@@ -1,6 +1,7 @@
 import asyncio
+import time
 
-from sqlalchemy import delete as sa_delete, select, func
+from sqlalchemy import and_, delete as sa_delete, or_, select, func
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
@@ -15,6 +16,7 @@ from app.redis_client import (
     clear_game_state,
     clear_lobby_ready,
     get_buzzer,
+    get_locked_set,
     get_lobby_ready_count,
     get_lobby_ready_set,
     get_participant_sid,
@@ -56,6 +58,7 @@ async def _emit_participants_update(game_uuid: str, to: str | None = None) -> No
         db_participants = result.scalars().all()
 
     ready_ids = await get_lobby_ready_set(game_uuid)
+    locked_ids = await get_locked_set(game_uuid)
 
     payload = {
         "participants": [
@@ -64,6 +67,7 @@ async def _emit_participants_update(game_uuid: str, to: str | None = None) -> No
                 "username": p.username,
                 "score": p.score,
                 "ready": p.id in ready_ids,
+                "locked": p.id in locked_ids,
             }
             for p in db_participants
         ]
@@ -110,9 +114,14 @@ async def handle_join_game(sid, data):
 
     await sio.enter_room(sid, f"game:{game_uuid}")
     await set_participant_sid(game_uuid, participant_id, sid)
+    participant_locked = await is_locked(game_uuid, participant_id)
 
     # Build the joined response (include current round for late joiners)
-    response: dict = {"game_uuid": game_uuid, "participant_id": participant_id}
+    response: dict = {
+        "game_uuid": game_uuid,
+        "participant_id": participant_id,
+        "locked": participant_locked,
+    }
     current_round_id = await get_game_state_field(game_uuid, "current_round_id")
     if current_round_id:
         async with AsyncSessionLocal() as db:
@@ -137,6 +146,55 @@ async def handle_join_present(sid, data):
         return
     await sio.enter_room(sid, f"game:{game_uuid}")
     await sio.emit("joined_present", {"game_uuid": game_uuid}, to=sid)
+
+    # Re-sync presentation state after reload/reconnect.
+    current_round_id = await get_game_state_field(game_uuid, "current_round_id")
+    present_phase = await get_game_state_field(game_uuid, "present_phase")
+    if current_round_id:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Round).options(selectinload(Round.locations)).where(Round.id == int(current_round_id))
+            )
+            r = result.scalar_one_or_none()
+            if r:
+                if present_phase == "revealed":
+                    correct_location = next((loc for loc in r.locations if loc.is_correct), None)
+                    await sio.emit(
+                        "round_end",
+                        {
+                            "round_id": r.id,
+                            "original_url": r.original_url,
+                            "ai_url": r.ai_url,
+                            "solution_text": r.solution_text,
+                            "target_year": r.target_year,
+                            "correct_location": correct_location.name if correct_location else None,
+                        },
+                        to=sid,
+                    )
+                elif present_phase == "quiz":
+                    await sio.emit(
+                        "round_start",
+                        {"round_id": r.id, "ai_image_url": r.ai_url},
+                        to=sid,
+                    )
+                    ends_at_raw = await get_game_state_field(game_uuid, "quiz_ends_at")
+                    now_ts = int(time.time())
+                    if ends_at_raw and ends_at_raw.isdigit():
+                        remaining = max(0, int(ends_at_raw) - now_ts)
+                    else:
+                        remaining = r.time_limit
+                    await sio.emit(
+                        "quiz_start",
+                        {"locations": [], "time_limit": remaining, "round_id": r.id},
+                        to=sid,
+                    )
+                else:
+                    await sio.emit(
+                        "round_start",
+                        {"round_id": r.id, "ai_image_url": r.ai_url},
+                        to=sid,
+                    )
+
     # Send the current participant list so the screen is up to date immediately
     await _emit_participants_update(game_uuid, to=sid)
 
@@ -168,30 +226,6 @@ async def handle_lobby_ready(sid, data):
 
     # Broadcast updated list (ready flag changed) to the whole room
     await _emit_participants_update(game_uuid)
-
-    # Check if all current participants are ready → auto-start
-    async with AsyncSessionLocal() as db:
-        count_result = await db.execute(
-            select(func.count(Participant.id)).where(Participant.game_uuid == game_uuid)
-        )
-        total = count_result.scalar() or 0
-
-        game_result = await db.execute(select(Game).where(Game.uuid == game_uuid))
-        game = game_result.scalar_one_or_none()
-        if not game or game.status != GameStatus.lobby or total == 0:
-            return
-
-        ready = await get_lobby_ready_count(game_uuid)
-        if ready < total:
-            return
-
-        # All ready – start the game
-        game.status = GameStatus.active
-        await db.commit()
-
-    await clear_lobby_ready(game_uuid)
-    await sio.emit("game_started", {"game_uuid": game_uuid}, room=f"admin:{game_uuid}")
-    await _handle_next_round(game_uuid)
 
 
 @sio.on("reconnect")
@@ -309,7 +343,13 @@ async def _handle_correct(game_uuid: str, round_id: int, participant_id: int):
 
         locations = [{"id": l.id, "name": l.name} for l in r.locations]
 
-    await set_game_state(game_uuid, buzzed_participant_id=participant_id, quiz_active=1)
+    await set_game_state(
+        game_uuid,
+        buzzed_participant_id=participant_id,
+        quiz_active=1,
+        present_phase="quiz",
+        quiz_ends_at=int(time.time()) + r.time_limit,
+    )
 
     await sio.emit(
         "quiz_start",
@@ -327,11 +367,24 @@ async def _handle_wrong(game_uuid: str, round_id: int, participant_id: int):
     await lock_participant(game_uuid, participant_id)
     await clear_buzzer(game_uuid, round_id)
 
-    p_sid = await get_participant_sid(game_uuid, participant_id)
-    if p_sid:
-        await sio.emit("lockout", {"reason": "wrong"}, to=p_sid)
+    locked_ids = await get_locked_set(game_uuid)
 
-    await sio.emit("unlock", {"message": "buzzer reset"}, room=f"game:{game_uuid}")
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Participant.id).where(Participant.game_uuid == game_uuid)
+        )
+        participant_ids = [row[0] for row in result.all()]
+
+    for pid in participant_ids:
+        p_sid = await get_participant_sid(game_uuid, pid)
+        if not p_sid:
+            continue
+        if pid in locked_ids:
+            await sio.emit("lockout", {"reason": "wrong"}, to=p_sid)
+        else:
+            await sio.emit("unlock", {"message": "buzzer reset"}, to=p_sid)
+
+    await _emit_participants_update(game_uuid)
 
 
 async def _handle_unlock(game_uuid: str, participant_id: int):
@@ -339,6 +392,7 @@ async def _handle_unlock(game_uuid: str, participant_id: int):
     p_sid = await get_participant_sid(game_uuid, int(participant_id))
     if p_sid:
         await sio.emit("unlock", {}, to=p_sid)
+    await _emit_participants_update(game_uuid)
 
 
 async def _handle_unlock_all(game_uuid: str, round_id: int | None):
@@ -346,6 +400,7 @@ async def _handle_unlock_all(game_uuid: str, round_id: int | None):
     if round_id:
         await clear_buzzer(game_uuid, round_id)
     await sio.emit("unlock_all", {}, room=f"game:{game_uuid}")
+    await _emit_participants_update(game_uuid)
 
 
 async def _handle_next_round(game_uuid: str):
@@ -353,18 +408,39 @@ async def _handle_next_round(game_uuid: str):
         current_id = await get_game_state_field(game_uuid, "current_round_id")
 
         if current_id:
-            result = await db.execute(
-                select(Round)
-                .where(Round.game_uuid == game_uuid, Round.position >
-                       select(Round.position).where(Round.id == int(current_id)).scalar_subquery())
-                .order_by(Round.position)
+            current_round_result = await db.execute(
+                select(Round.id, Round.position)
+                .where(Round.id == int(current_id), Round.game_uuid == game_uuid)
                 .limit(1)
             )
+            current_round = current_round_result.one_or_none()
+
+            if current_round is None:
+                result = await db.execute(
+                    select(Round)
+                    .where(Round.game_uuid == game_uuid)
+                    .order_by(Round.position.asc(), Round.id.asc())
+                    .limit(1)
+                )
+            else:
+                current_round_id, current_position = current_round
+                result = await db.execute(
+                    select(Round)
+                    .where(
+                        Round.game_uuid == game_uuid,
+                        or_(
+                            Round.position > current_position,
+                            and_(Round.position == current_position, Round.id > current_round_id),
+                        ),
+                    )
+                    .order_by(Round.position.asc(), Round.id.asc())
+                    .limit(1)
+                )
         else:
             result = await db.execute(
                 select(Round)
                 .where(Round.game_uuid == game_uuid)
-                .order_by(Round.position)
+                .order_by(Round.position.asc(), Round.id.asc())
                 .limit(1)
             )
         next_round = result.scalar_one_or_none()
@@ -374,7 +450,9 @@ async def _handle_next_round(game_uuid: str):
         return
 
     await unlock_all_participants(game_uuid)
-    await set_game_state(game_uuid, current_round_id=next_round.id, quiz_active=0)
+    await clear_buzzer(game_uuid, next_round.id)
+    await set_game_state(game_uuid, current_round_id=next_round.id, quiz_active=0, present_phase="round", quiz_ends_at=0)
+    await _emit_participants_update(game_uuid)
 
     await sio.emit(
         "round_start",
@@ -385,10 +463,15 @@ async def _handle_next_round(game_uuid: str):
 
 async def _handle_reveal(game_uuid: str, round_id: int):
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Round).where(Round.id == round_id))
+        result = await db.execute(
+            select(Round).options(selectinload(Round.locations)).where(Round.id == round_id)
+        )
         r = result.scalar_one_or_none()
         if not r:
             return
+
+    await set_game_state(game_uuid, present_phase="revealed")
+    correct_location = next((loc for loc in r.locations if loc.is_correct), None)
 
     await sio.emit(
         "round_end",
@@ -398,6 +481,7 @@ async def _handle_reveal(game_uuid: str, round_id: int):
             "ai_url": r.ai_url,
             "solution_text": r.solution_text,
             "target_year": r.target_year,
+            "correct_location": correct_location.name if correct_location else None,
         },
         room=f"game:{game_uuid}",
     )
@@ -447,9 +531,15 @@ async def _handle_reset_game(game_uuid: str):
         for p in participants_result.scalars().all():
             p.score = 0
 
+        game_result = await db.execute(select(Game).where(Game.uuid == game_uuid))
+        game = game_result.scalar_one_or_none()
+        if game:
+            game.status = GameStatus.lobby
+
         await db.commit()
 
     await clear_game_state(game_uuid)
+    await clear_lobby_ready(game_uuid)
     await unlock_all_participants(game_uuid)
     for rid in round_ids:
         await clear_buzzer(game_uuid, rid)
@@ -459,12 +549,27 @@ async def _handle_reset_game(game_uuid: str):
 
 
 async def _handle_end_game(game_uuid: str):
+    for key in list(_quiz_tasks.keys()):
+        if key.startswith(f"{game_uuid}:"):
+            _quiz_tasks[key].cancel()
+            _quiz_tasks.pop(key, None)
+
     async with AsyncSessionLocal() as db:
+        rounds_result = await db.execute(select(Round.id).where(Round.game_uuid == game_uuid))
+        round_ids = [row[0] for row in rounds_result.all()]
+
         result = await db.execute(select(Game).where(Game.uuid == game_uuid))
         game = result.scalar_one_or_none()
         if game:
             game.status = GameStatus.lobby
             await db.commit()
+
+    await clear_game_state(game_uuid)
+    await clear_lobby_ready(game_uuid)
+    await unlock_all_participants(game_uuid)
+    for rid in round_ids:
+        await clear_buzzer(game_uuid, rid)
+
     await sio.emit("game_end", {}, room=f"game:{game_uuid}")
 
 
@@ -569,11 +674,16 @@ async def _finalize_quiz(game_uuid: str, round_id: int):
                 })
 
     leaderboard = sorted(results, key=lambda x: x["score"], reverse=True)
+    await set_game_state(game_uuid, present_phase="revealed")
     await sio.emit(
         "quiz_result",
         {
             "results": results,
             "leaderboard": leaderboard,
+            "round_id": r.id,
+            "original_url": r.original_url,
+            "ai_url": r.ai_url,
+            "solution_text": r.solution_text,
             "target_year": r.target_year,
             "correct_location": correct_location_name,
         },

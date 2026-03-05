@@ -29,4 +29,6 @@ export interface Participant {
   id: number;
   username: string;
   score: number;
+  ready: boolean;
+  locked: boolean;
 }

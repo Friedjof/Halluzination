@@ -41,6 +41,11 @@ async def is_locked(game_uuid: str, participant_id: int) -> bool:
     return bool(await redis.sismember(f"locked:{game_uuid}", participant_id))
 
 
+async def get_locked_set(game_uuid: str) -> set[int]:
+    members = await redis.smembers(f"locked:{game_uuid}")
+    return {int(m) for m in members}
+
+
 # --- SID ↔ participant mapping ---
 
 async def set_participant_sid(game_uuid: str, participant_id: int, sid: str) -> None:

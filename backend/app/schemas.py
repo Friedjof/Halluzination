@@ -77,6 +77,8 @@ class ParticipantOut(BaseModel):
     id: int
     username: str
     score: int
+    ready: bool = False
+    locked: bool = False
 
     model_config = {"from_attributes": True}
 

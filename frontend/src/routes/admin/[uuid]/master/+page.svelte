@@ -26,6 +26,20 @@
   let quizTimer: ReturnType<typeof setInterval> | null = null;
 
   let participants: Participant[] = [];
+  type PlayerCardState = 'idle' | 'buzzed' | 'correct' | 'wrong';
+  let playerCardStates: Record<number, PlayerCardState> = {};
+
+  function getPlayerCardState(participantId: number): PlayerCardState {
+    return playerCardStates[participantId] ?? 'idle';
+  }
+
+  function setPlayerCardState(participantId: number, state: Exclude<PlayerCardState, 'idle'>) {
+    playerCardStates = { ...playerCardStates, [participantId]: state };
+  }
+
+  function resetPlayerCardStates() {
+    playerCardStates = {};
+  }
 
   function resolveUrl(url: string): string {
     return url.startsWith('http') ? url : `${BACKEND}${url}`;
@@ -39,12 +53,14 @@
 
   function correct() {
     if (!buzzedParticipant || !currentRound) return;
+    setPlayerCardState(buzzedParticipant.id, 'correct');
     emit('correct', { participant_id: buzzedParticipant.id, round_id: currentRound.id });
     phase = 'quiz';
   }
 
   function wrong() {
     if (!buzzedParticipant || !currentRound) return;
+    setPlayerCardState(buzzedParticipant.id, 'wrong');
     emit('wrong', { participant_id: buzzedParticipant.id, round_id: currentRound.id });
     buzzedParticipant = null;
     phase = 'round';
@@ -86,6 +102,8 @@
   function kickParticipant(id: number) {
     socket.emit('admin_action', { game_uuid: uuid, admin_token: $adminToken, action: 'kick', participant_id: id });
     participants = participants.filter((p) => p.id !== id); // optimistic
+    const { [id]: _removed, ...rest } = playerCardStates;
+    playerCardStates = rest;
   }
 
   function handleKey(e: KeyboardEvent) {
@@ -119,12 +137,14 @@
       currentRound = game?.rounds.find((r) => r.id === data.round_id) ?? null;
       currentRoundIndex = game?.rounds.findIndex((r) => r.id === data.round_id) ?? -1;
       buzzedParticipant = null;
+      resetPlayerCardStates();
       phase = 'round';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
     });
 
     socket.on('buzz_received', (data) => {
       buzzedParticipant = { id: data.participant_id, username: data.username };
+      setPlayerCardState(data.participant_id, 'buzzed');
       phase = 'buzzed';
     });
 
@@ -139,10 +159,13 @@
     });
 
     socket.on('quiz_result', (data) => {
+      const stateById = new Map(participants.map((p) => [p.id, { ready: p.ready, locked: p.locked }]));
       participants = data.leaderboard.map((x: any) => ({
         id: x.participant_id,
         username: x.username,
         score: x.score,
+        ready: stateById.get(x.participant_id)?.ready ?? false,
+        locked: stateById.get(x.participant_id)?.locked ?? false,
       }));
       phase = 'result';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
@@ -163,6 +186,7 @@
       currentRound = null;
       currentRoundIndex = -1;
       buzzedParticipant = null;
+      resetPlayerCardStates();
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
     });
 
@@ -242,7 +266,7 @@
               {#each sortedParticipants as p, i}
                 <div class="score-row">
                   <span class="rank">{i + 1}.</span>
-                  <span class="pname">{p.username}</span>
+                  <span class="pname" class:ready={p.ready}>{p.username}</span>
                   <span class="pts">{p.score} Pkt</span>
                   <button class="kick-btn" title="Spieler entfernen" on:click={() => kickParticipant(p.id)}>✕</button>
                 </div>
@@ -254,6 +278,26 @@
 
       <!-- Right column: buzzer + controls -->
       <div class="right-col">
+        <div class="panel">
+          <div class="panel-title">Teilnehmer</div>
+          {#if participants.length === 0}
+            <p class="muted">Noch keine Teilnehmer</p>
+          {:else}
+            <div class="player-grid">
+              {#each participants as p (p.id)}
+                <div
+                  class="player-card"
+                  class:card-buzzed={getPlayerCardState(p.id) === 'buzzed'}
+                  class:card-correct={getPlayerCardState(p.id) === 'correct'}
+                  class:card-wrong={getPlayerCardState(p.id) === 'wrong'}
+                >
+                  <span>{p.username}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
         <!-- Buzzer card -->
         {#if phase === 'buzzed'}
           <div class="panel buzzer-panel">
@@ -507,6 +551,7 @@
   .score-row:last-child { border-bottom: none; }
   .rank { color: #aaa; font-weight: 700; width: 1.5rem; }
   .pname { flex: 1; font-weight: 500; }
+  .pname.ready { color: #28a745; font-weight: 700; }
   .pts { font-weight: 700; color: #0066cc; }
   .kick-btn {
     background: none;
@@ -588,6 +633,47 @@
   }
 
   .status-panel { background: #f8f9fa; }
+
+  .player-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .player-card {
+    min-height: 52px;
+    border-radius: 10px;
+    border: 1.5px solid #dfe3e8;
+    background: #f8fafc;
+    color: #1f2937;
+    font-size: 0.9rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0.5rem 0.35rem;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    overflow-wrap: anywhere;
+  }
+
+  .player-card.card-buzzed {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #92400e;
+  }
+
+  .player-card.card-correct {
+    background: #dcfce7;
+    border-color: #22c55e;
+    color: #166534;
+  }
+
+  .player-card.card-wrong {
+    background: #fee2e2;
+    border-color: #ef4444;
+    color: #991b1b;
+  }
 
   /* Controls */
   .ctrl-grid {

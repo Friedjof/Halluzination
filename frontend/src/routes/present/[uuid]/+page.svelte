@@ -19,6 +19,7 @@
   let originalUrl = '';
   let solutionText = '';
   let targetYear: number | null = null;
+  let correctLocation = '';
 
   let buzzerName = '';
 
@@ -35,7 +36,8 @@
     QRCode.toCanvas(qrCanvas, game.join_url, { width: 300, margin: 2 }).catch(() => {});
   }
 
-  function resolveUrl(url: string): string {
+  function resolveUrl(url: string | null | undefined): string {
+    if (!url) return '';
     return url.startsWith('http') ? url : `${BACKEND}${url}`;
   }
 
@@ -54,6 +56,7 @@
       originalUrl = '';
       solutionText = '';
       targetYear = null;
+      correctLocation = '';
       buzzerName = '';
       phase = 'round';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
@@ -89,7 +92,12 @@
 
     socket.on('quiz_result', (data) => {
       leaderboard = data.leaderboard;
-      phase = 'result';
+      originalUrl = resolveUrl(data.original_url);
+      aiImageUrl = resolveUrl(data.ai_url);
+      solutionText = data.solution_text ?? '';
+      targetYear = data.target_year ?? null;
+      correctLocation = data.correct_location ?? '';
+      phase = 'revealed';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
     });
 
@@ -98,6 +106,7 @@
       aiImageUrl = resolveUrl(data.ai_url);
       solutionText = data.solution_text;
       targetYear = data.target_year ?? null;
+      correctLocation = data.correct_location ?? '';
       buzzerName = '';
       phase = 'revealed';
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
@@ -105,6 +114,20 @@
 
     socket.on('participants_update', (data: { participants: { id: number; username: string; ready: boolean }[] }) => {
       lobbyParticipants = data.participants;
+    });
+
+    socket.on('game_reset', () => {
+      aiImageUrl = '';
+      originalUrl = '';
+      solutionText = '';
+      targetYear = null;
+      correctLocation = '';
+      buzzerName = '';
+      leaderboard = [];
+      quizTimeLeft = 0;
+      if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
+      lobbyParticipants = lobbyParticipants.map((p) => ({ ...p, ready: false }));
+      phase = 'lobby';
     });
 
     socket.on('game_end', () => {
@@ -123,6 +146,7 @@
     socket.off('quiz_result');
     socket.off('round_end');
     socket.off('participants_update');
+    socket.off('game_reset');
     socket.off('game_end');
     socket.disconnect();
   });
@@ -145,10 +169,14 @@
         {#if lobbyParticipants.length === 0}
           <p class="player-list-empty">Noch keine Teilnehmer…</p>
         {:else}
-          <p class="player-list-label">Bereit ({lobbyParticipants.length})</p>
+          <p class="player-list-label">
+            Bereit ({lobbyParticipants.filter((p) => p.ready).length}/{lobbyParticipants.length})
+          </p>
           <div class="player-chips">
             {#each lobbyParticipants as p (p.id)}
-              <span class="player-chip">{p.username}</span>
+              <span class="player-chip" class:ready={p.ready}>
+                {#if p.ready}✓ {/if}{p.username}
+              </span>
             {/each}
           </div>
         {/if}
@@ -162,13 +190,16 @@
       {/if}
 
       {#if phase === 'buzzed'}
-        <div class="overlay buzzer-overlay">
-          <span class="buzz-icon">🔔</span>
+        <div class="buzz-top-badge">
+          <span class="buzz-label">Buzzer</span>
           <span class="buzz-name">{buzzerName}</span>
         </div>
       {/if}
 
       {#if phase === 'quiz'}
+        <div class="quiz-hint">
+          Schnell: Schau auf dein Handy und beantworte das Quiz.
+        </div>
         <div class="timer-badge">
           <span class="timer-num">{quizTimeLeft}</span>
           <span class="timer-label">Sekunden</span>
@@ -202,9 +233,10 @@
           <img src={originalUrl} alt="Original" />
         </div>
       </div>
-      {#if solutionText || targetYear}
+      {#if solutionText || targetYear || correctLocation}
         <div class="solution">
           {#if solutionText}<p>{solutionText}</p>{/if}
+          {#if correctLocation}<p>📍 Richtige Location: <strong>{correctLocation}</strong></p>{/if}
           {#if targetYear}<p class="year">📅 {targetYear}</p>{/if}
         </div>
       {/if}
@@ -316,6 +348,13 @@
     font-weight: 600;
     color: white;
     animation: pop-in 0.25s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .player-chip.ready {
+    background: rgba(34, 197, 94, 0.18);
+    border-color: rgba(34, 197, 94, 0.6);
+    color: #c8facc;
   }
 
   @keyframes pop-in {
@@ -346,28 +385,41 @@
     filter: blur(14px) brightness(0.6);
   }
 
-  .overlay {
+  .buzz-top-badge {
     position: absolute;
-    inset: 0;
-  }
-
-  .buzzer-overlay {
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(88%, 680px);
+    padding: 0.55rem 1rem 0.65rem;
+    border-radius: 12px;
+    background: rgba(0,0,0,0.62);
+    border: 1px solid rgba(255,255,255,0.22);
+    backdrop-filter: blur(3px);
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,0.5);
-    gap: 0.5rem;
+    gap: 0.05rem;
+    text-align: center;
   }
 
-  .buzz-icon { font-size: 4rem; }
+  .buzz-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.62);
+  }
+
   .buzz-name {
-    font-size: 3rem;
-    font-weight: 900;
+    font-size: clamp(1rem, 2.1vw, 1.55rem);
+    font-weight: 800;
     color: #ffd700;
     text-shadow: 0 2px 16px rgba(0,0,0,0.9);
-    text-align: center;
-    padding: 0 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
 
   .timer-badge {
@@ -384,6 +436,24 @@
   }
   .timer-num { font-size: 2.8rem; font-weight: 900; line-height: 1; }
   .timer-label { font-size: 0.65rem; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 1px; }
+
+  .quiz-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    width: min(92%, 980px);
+    text-align: center;
+    font-size: clamp(1rem, 1.8vw, 1.5rem);
+    font-weight: 800;
+    color: #ffffff;
+    background: rgba(0,0,0,0.62);
+    border: 1px solid rgba(255,255,255,0.24);
+    border-radius: 12px;
+    padding: 0.6rem 1rem;
+    backdrop-filter: blur(3px);
+    text-shadow: 0 2px 14px rgba(0,0,0,0.85);
+  }
 
   /* Result / leaderboard */
   .result-area {
