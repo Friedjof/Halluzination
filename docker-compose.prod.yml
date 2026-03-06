@@ -8,31 +8,49 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - db_data:/var/lib/postgresql/data
+    networks:
+      - data_net
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    networks:
+      - data_net
 
   backend:
-    image: ghcr.io/${GHCR_OWNER}/halluzination/backend:${VERSION:-latest}
+    image: ghcr.io/friedjof/halluzination/backend:latest
     restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+      FRONTEND_URL: https://${APP_DOMAIN:-localhost}
+      ALLOWED_ORIGINS: '["https://${APP_DOMAIN:-localhost}"]'
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       - db
       - redis
+    networks:
+      - app_net
+      - data_net
 
   frontend:
-    image: ghcr.io/${GHCR_OWNER}/halluzination/frontend:${VERSION:-latest}
+    image: ghcr.io/friedjof/halluzination/frontend:latest
     restart: unless-stopped
+    environment:
+      ORIGIN: https://${APP_DOMAIN:-localhost}
     depends_on:
       - backend
+    networks:
+      - app_net
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -43,8 +61,16 @@ services:
     depends_on:
       - backend
       - frontend
+    networks:
+      - app_net
 
 volumes:
   db_data:
   caddy_data:
   caddy_config:
+  uploads_data:
+
+networks:
+  app_net:
+  data_net:
+    internal: true

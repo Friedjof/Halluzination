@@ -13,7 +13,7 @@
       ? round.solution_text.slice(0, 48) + '…'
       : round.solution_text;
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? '';
   $: imageUrl = round.original_url
     ? round.original_url.startsWith('http')
       ? round.original_url

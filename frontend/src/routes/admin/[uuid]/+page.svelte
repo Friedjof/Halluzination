@@ -37,7 +37,7 @@
   let socketConnected = false;
   let lobbySocket: Socket;
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? '';
 
   onMount(async () => {
     if (!$adminToken) { goto('/admin'); return; }
@@ -166,7 +166,7 @@
   let exporting = false;
   let exportError = '';
 
-  const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BASE = import.meta.env.VITE_BACKEND_URL ?? '';
 
   async function exportGame() {
     exporting = true;

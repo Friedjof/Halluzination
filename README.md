@@ -54,6 +54,84 @@ make db-migrate msg="beschreibung der änderung"
 docker compose exec db psql -U halluzination -d halluzination
 ```
 
+## Produktion aufsetzen (Docker Compose)
+
+Diese Anleitung nutzt [`docker-compose.prod.yml`](docker-compose.prod.yml) und die veröffentlichten Images aus `ghcr.io/friedjof/halluzination/*:latest`.
+
+### 1. Voraussetzungen
+
+- Linux-Server mit Docker + Docker Compose Plugin
+- Domain, die auf den Server zeigt (A/AAAA-Record)
+- Ports `80` und `443` offen (für HTTPS via Caddy/Let's Encrypt)
+
+### 2. Projekt holen
+
+```bash
+git clone git@github.com:Friedjof/Halluzination.git
+cd Halluzination
+```
+
+### 3. Produktive `.env` erstellen
+
+```bash
+cp .env.example .env
+```
+
+Für `docker-compose.prod.yml` sind diese Variablen zwingend:
+
+```env
+ADMIN_TOKEN=<starkes-geheimes-token>
+POSTGRES_USER=halluzination
+POSTGRES_PASSWORD=<starkes-db-passwort>
+POSTGRES_DB=halluzination
+APP_DOMAIN=deine-domain.tld
+```
+
+Hinweise:
+
+- `APP_DOMAIN` wird in der Prod-Compose für Caddy-Host, Backend-CORS/Join-URLs und Frontend-Origin verwendet.
+- `DATABASE_URL`, `REDIS_URL`, `ALLOWED_ORIGINS`, `FRONTEND_URL` und `UPLOAD_DIR` sind in Prod nicht zwingend, da sie per `docker-compose.prod.yml` gesetzt werden.
+
+### 4. Container starten (Erstdeployment)
+
+```bash
+# Aktuelle Images holen
+docker compose -f docker-compose.prod.yml pull
+
+# Datenbank/Redis hochfahren
+docker compose -f docker-compose.prod.yml up -d db redis
+
+# Migrationen anwenden
+docker compose -f docker-compose.prod.yml run --rm backend uv run alembic upgrade head
+
+# Gesamten Stack starten
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### 5. Status prüfen
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f backend caddy
+```
+
+Dann im Browser öffnen: `https://deine-domain.tld/admin`
+
+### 6. Update auf neue Releases
+
+```bash
+git pull
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml run --rm backend uv run alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Hinweise:
+
+- Backend- und Frontend-Image sind auf `latest` fixiert.
+- Uploads bleiben persistent im Docker-Volume `uploads_data` erhalten.
+- Postgres und Redis laufen nur intern im Docker-Netz (`data_net`) und sind nicht nach außen veröffentlicht.
+
 ## Entwicklungsphasen
 
 - **Phase 1** – Docker Setup, DB-Modelle, Auth, Upload, QR-Code, Beitreten

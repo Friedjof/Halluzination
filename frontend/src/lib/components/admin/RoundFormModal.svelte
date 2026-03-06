@@ -9,7 +9,7 @@
 
   const dispatch = createEventDispatcher<{ save: Round; close: void }>();
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? '';
 
   // Form state
   let solutionText = round?.solution_text ?? '';

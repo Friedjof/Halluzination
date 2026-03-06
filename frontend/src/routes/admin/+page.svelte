@@ -3,7 +3,7 @@
   import { api } from '$lib/api';
   import { adminToken } from '$lib/stores/auth';
 
-  const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BASE = import.meta.env.VITE_BACKEND_URL ?? '';
 
   let tokenInput = '';
   let gameTitle = '';
@@ -43,7 +43,7 @@
     error = '';
     loading = true;
     try {
-      const r = await fetch(`${import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000'}/api/auth/verify`, {
+      const r = await fetch(`${import.meta.env.VITE_BACKEND_URL ?? ''}/api/auth/verify`, {
         method: 'POST',
         headers: { 'X-Admin-Token': tokenInput },
       });

@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { adminToken } from '$lib/stores/auth';
 
-const BASE_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_BACKEND_URL ?? '';
 
 async function request(method: string, path: string, body?: unknown) {
   const token = get(adminToken);

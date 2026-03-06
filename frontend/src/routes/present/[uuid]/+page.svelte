@@ -8,7 +8,7 @@
   import type { Game } from '$lib/types';
   import ImageCompareSlider from '$lib/components/ImageCompareSlider.svelte';
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? '';
   $: uuid = $page.params.uuid;
 
   let game: Game | null = null;

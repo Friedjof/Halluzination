@@ -10,7 +10,7 @@
   import RoundFormModal from '$lib/components/admin/RoundFormModal.svelte';
   import Sortable from 'sortablejs';
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? '';
   $: uuid = $page.params.uuid;
 
   let game: Game | null = null;
@@ -115,7 +115,7 @@
   // Inline score editing
   let buzzerSoundEnabled = true;
 
-  const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+  const BASE = import.meta.env.VITE_BACKEND_URL ?? '';
   let exporting = false;
 
   async function exportGame() {
