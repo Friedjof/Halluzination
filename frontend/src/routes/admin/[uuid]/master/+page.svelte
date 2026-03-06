@@ -141,7 +141,7 @@
   function handleKey(e: KeyboardEvent) {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
     switch (e.key) {
-      case ' ': e.preventDefault(); nextRound(); break;
+      case ' ': e.preventDefault(); handleNextOrEnd(); break;
       case 'c': case 'C': correct(); break;
       case 'w': case 'W': wrong(); break;
       case 'r': case 'R': reveal(); break;
@@ -250,6 +250,13 @@
     ? `Runde ${currentRoundIndex + 1} / ${game.rounds.length}`
     : '–';
   $: sortedParticipants = [...participants].sort((a, b) => b.score - a.score);
+  $: isLastRound = game !== null && currentRoundIndex >= 0 && currentRoundIndex === game.rounds.length - 1;
+  $: showEndButton = isLastRound && (phase === 'revealed' || phase === 'result');
+
+  function handleNextOrEnd() {
+    if (showEndButton) endGame();
+    else nextRound();
+  }
 </script>
 
 {#if error}
@@ -388,8 +395,8 @@
         <div class="panel">
           <div class="panel-title">Steuerung</div>
           <div class="ctrl-grid">
-            <button class="btn-primary span2" on:click={nextRound}>
-              ▶ Nächste Runde <kbd>Space</kbd>
+            <button class="btn-primary span2" class:btn-end-game={showEndButton} on:click={handleNextOrEnd}>
+              {showEndButton ? '■ Spiel beenden' : '▶ Nächste Runde'} <kbd>Space</kbd>
             </button>
             <button class="btn-secondary" on:click={reveal}
               disabled={!currentRound || phase === 'revealed' || phase === 'waiting'}>
@@ -768,6 +775,8 @@
     gap: 0.5rem;
   }
   .btn-primary:hover { opacity: 0.85; }
+  .btn-end-game { background: #dc3545; }
+  .btn-end-game:hover { background: #c82333; opacity: 1; }
 
   .btn-secondary {
     background: #f0f2f5;

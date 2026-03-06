@@ -13,7 +13,7 @@
 
   let game: Game | null = null;
 
-  type Phase = 'lobby' | 'round' | 'buzzed' | 'quiz' | 'result' | 'revealed';
+  type Phase = 'lobby' | 'round' | 'buzzed' | 'quiz' | 'result' | 'revealed' | 'final';
   let phase: Phase = 'lobby';
 
   let aiImageUrl = '';
@@ -131,9 +131,10 @@
       phase = 'lobby';
     });
 
-    socket.on('game_end', () => {
+    socket.on('game_end', (data) => {
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
-      window.close();
+      if (data?.leaderboard?.length) leaderboard = data.leaderboard;
+      phase = 'final';
     });
   });
 
@@ -232,6 +233,33 @@
           {#if targetYear}<p class="year">📅 {targetYear}</p>{/if}
         </div>
       {/if}
+    </div>
+
+  {:else if phase === 'final'}
+    <div class="final-area">
+      <h2 class="final-title">🏆 Endstand</h2>
+      <div class="final-bars">
+        {#each leaderboard as p, i}
+          {@const maxScore = leaderboard[0]?.score || 1}
+          {@const pct = Math.max(6, (p.score / maxScore) * 100)}
+          <div class="bar-row" style="animation-delay: {i * 80}ms">
+            <span class="bar-rank">
+              {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+            </span>
+            <span class="bar-name">{p.username}</span>
+            <div class="bar-track">
+              <div
+                class="bar-fill"
+                class:gold={i === 0}
+                class:silver={i === 1}
+                class:bronze={i === 2}
+                style="width: {pct}%"
+              ></div>
+            </div>
+            <span class="bar-score">{p.score} Pkt</span>
+          </div>
+        {/each}
+      </div>
     </div>
 
   {/if}
@@ -499,4 +527,82 @@
   }
 
   .year { font-size: 1.4rem; font-weight: 800; color: #ffd700; margin-top: 0.25rem; }
+
+  /* Final leaderboard */
+  .final-area {
+    width: 100%;
+    max-width: min(100vw, 1100px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    padding: 0 1rem;
+    box-sizing: border-box;
+  }
+
+  .final-title {
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 900;
+    margin: 0;
+    letter-spacing: -0.5px;
+  }
+
+  .final-bars {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 3rem 14rem 1fr 6rem;
+    align-items: center;
+    gap: 1rem;
+    opacity: 0;
+    animation: bar-in 0.4s ease forwards;
+  }
+
+  @keyframes bar-in {
+    from { opacity: 0; transform: translateX(-20px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .bar-rank {
+    font-size: clamp(1.1rem, 2vw, 1.6rem);
+    text-align: center;
+  }
+
+  .bar-name {
+    font-size: clamp(1rem, 1.8vw, 1.4rem);
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bar-track {
+    background: rgba(255,255,255,0.1);
+    border-radius: 8px;
+    height: clamp(28px, 3.5vw, 48px);
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.5);
+    transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bar-fill.gold   { background: linear-gradient(90deg, #f59e0b, #fde68a); }
+  .bar-fill.silver { background: linear-gradient(90deg, #94a3b8, #e2e8f0); }
+  .bar-fill.bronze { background: linear-gradient(90deg, #b45309, #fcd34d); }
+
+  .bar-score {
+    font-size: clamp(0.95rem, 1.6vw, 1.3rem);
+    font-weight: 800;
+    color: rgba(255,255,255,0.75);
+    text-align: right;
+    white-space: nowrap;
+  }
 </style>
