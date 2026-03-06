@@ -57,8 +57,8 @@
 
   main {
     flex: 1;
-    padding: 2rem;
-    max-width: 1200px;
+    padding: 1.5rem 2rem;
+    max-width: 1600px;
     margin: 0 auto;
     width: 100%;
   }

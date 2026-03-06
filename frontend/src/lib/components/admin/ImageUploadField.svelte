@@ -87,7 +87,7 @@
   .drop-zone {
     border: 2px dashed #c8cdd4;
     border-radius: 10px;
-    height: 200px;
+    height: 270px;
     cursor: pointer;
     position: relative;
     overflow: hidden;

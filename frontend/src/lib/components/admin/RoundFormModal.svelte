@@ -14,7 +14,7 @@
   // Form state
   let solutionText = round?.solution_text ?? '';
   let targetYear: number | '' = round?.target_year ?? '';
-  let timeLimit = round?.time_limit ?? 20;
+  let timeLimit = Math.round((Math.min(45, Math.max(15, round?.time_limit ?? 20))) / 5) * 5;
 
   // Locations
   let useLocations = (round?.locations.length ?? 0) > 0;
@@ -36,6 +36,8 @@
   let aiPreview = round?.ai_url
     ? round.ai_url.startsWith('http') ? round.ai_url : `${BACKEND}${round.ai_url}`
     : '';
+  let originalFilename: string | null = round?.original_filename ?? null;
+  let aiFilename: string | null = round?.ai_filename ?? null;
   let uploadImageError = '';
 
   // Progress
@@ -139,18 +141,24 @@
     <div class="modal-body">
       <!-- Images -->
       <div class="image-row">
-        <ImageUploadField
-          label="Original"
-          bind:preview={originalPreview}
-          bind:error={uploadImageError}
-          on:select={(e) => (originalFile = e.detail)}
-        />
-        <ImageUploadField
-          label="KI-Bild"
-          bind:preview={aiPreview}
-          error=""
-          on:select={(e) => (aiFile = e.detail)}
-        />
+        <div class="img-col">
+          <ImageUploadField
+            label="Original"
+            bind:preview={originalPreview}
+            bind:error={uploadImageError}
+            on:select={(e) => { originalFile = e.detail; originalFilename = e.detail.name; }}
+          />
+          <p class="filename">{originalFilename ?? '–'}</p>
+        </div>
+        <div class="img-col">
+          <ImageUploadField
+            label="KI-Bild"
+            bind:preview={aiPreview}
+            error=""
+            on:select={(e) => { aiFile = e.detail; aiFilename = e.detail.name; }}
+          />
+          <p class="filename">{aiFilename ?? '–'}</p>
+        </div>
       </div>
 
       <!-- Upload progress -->
@@ -164,7 +172,7 @@
       <!-- Metadata -->
       <div class="form-grid">
         <label class="full">
-          Auflösungssatz <span class="req">*</span>
+          <span style="white-space: nowrap">Auflösungssatz <span class="req">*</span></span>
           <input
             type="text"
             bind:value={solutionText}
@@ -173,7 +181,7 @@
         </label>
 
         <label>
-          Jahr <span class="opt">(optional)</span>
+          <span style="white-space: nowrap">Jahr <span class="opt">(optional)</span></span>
           <input
             type="number"
             bind:value={targetYear}
@@ -185,20 +193,20 @@
         </label>
 
         <label>
-          Antwortzeit: <strong>{timeLimit}s</strong>
-          <input type="range" bind:value={timeLimit} min="5" max="30" step="1" />
-          <div class="range-labels"><span>5s</span><span>30s</span></div>
+          <span style="white-space: nowrap">Antwortzeit: <strong>{timeLimit}s</strong></span>
+          <input type="range" bind:value={timeLimit} min="15" max="45" step="5" />
+          <div class="range-labels"><span>15s</span><span>45s</span></div>
         </label>
       </div>
 
       <!-- Locations -->
-      <fieldset class="locations" class:disabled={!useLocations}>
-        <legend>
-          <label class="toggle-label">
-            <input type="checkbox" bind:checked={useLocations} />
-            Ortswahl <span class="opt">(optional)</span>
-          </label>
-        </legend>
+      <div class="locations" class:disabled={!useLocations}>
+        <div class="loc-header">
+          <span class="loc-title">Ortswahl <span class="opt">(optional)</span></span>
+          <button type="button" class="toggle-switch" class:on={useLocations} on:click={() => useLocations = !useLocations} aria-pressed={useLocations}>
+            <span class="toggle-knob" />
+          </button>
+        </div>
         {#if useLocations}
           <div class="loc-grid">
             {#each locations as loc, i}
@@ -217,17 +225,12 @@
                   placeholder="Location {i + 1}"
                   class:correct={loc.is_correct}
                 />
-                <label for="loc-{i}" class="radio-label" title="Richtige Antwort">
-                  {loc.is_correct ? '✅' : '○'}
-                </label>
               </div>
             {/each}
           </div>
-          <p class="loc-hint">Wähle per Klick auf den Radio-Button die richtige Location aus.</p>
-        {:else}
-          <p class="loc-hint skip-hint">Keine Ortswahl – Teilnehmer sehen keine Auswahl.</p>
+          <p class="loc-hint">Radio-Button = richtige Antwort</p>
         {/if}
-      </fieldset>
+      </div>
 
       {#if !useLocations && targetYear === ''}
         <p class="quiz-skip-info">ℹ️ Weder Ortswahl noch Jahr angegeben – die Fragerunde wird für diese Runde übersprungen.</p>
@@ -264,7 +267,7 @@
     background: white;
     border-radius: 14px;
     width: 100%;
-    max-width: 780px;
+    max-width: 980px;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
@@ -276,11 +279,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1.25rem 1.5rem;
+    padding: 0.75rem 1.25rem;
     border-bottom: 1px solid #f0f2f5;
     flex-shrink: 0;
   }
-  h2 { font-size: 1.1rem; color: #1a1a2e; }
+  h2 { font-size: 1rem; color: #1a1a2e; }
 
   .close {
     background: none;
@@ -295,17 +298,31 @@
 
   .modal-body {
     overflow-y: auto;
-    padding: 1.5rem;
+    padding: 0.9rem 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 0.75rem;
     flex: 1;
   }
 
   .image-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: 0.75rem;
+  }
+
+  .img-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .filename {
+    font-size: 0.72rem;
+    color: #888;
+    margin: 0;
+    word-break: break-all;
+    font-style: italic;
   }
 
   .progress-wrap {
@@ -335,26 +352,26 @@
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: 0.6rem;
   }
   .full { grid-column: 1 / -1; }
 
   label {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    font-size: 0.82rem;
+    gap: 0.3rem;
+    font-size: 0.8rem;
     font-weight: 600;
     color: #444;
   }
   .req { color: #dc3545; }
-  .opt { color: #888; font-weight: 400; font-size: 0.78rem; }
+  .opt { color: #888; font-weight: 400; font-size: 0.75rem; }
 
   input[type="text"], input[type="number"] {
     border: 1.5px solid #d0d5dd;
-    border-radius: 8px;
-    padding: 0.6rem 0.8rem;
-    font-size: 0.95rem;
+    border-radius: 7px;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.9rem;
     transition: border-color 0.15s;
     width: 100%;
   }
@@ -375,47 +392,76 @@
   .locations {
     border: 1.5px solid #e0e3e8;
     border-radius: 10px;
-    padding: 1rem 1.2rem;
-  }
-  legend {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #444;
-    padding: 0 0.3rem;
+    padding: 0.6rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
-  .loc-grid { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+  .loc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .loc-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #444;
+  }
+
+  /* Toggle switch */
+  .toggle-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 20px;
+    background: #d0d5dd;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle-switch.on { background: #0066cc; }
+
+  .toggle-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: left 0.2s;
+  }
+  .toggle-switch.on .toggle-knob { left: 19px; }
+
+  .loc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
 
   .loc-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.4rem;
   }
 
   .loc-row input[type="text"] {
     flex: 1;
-    padding: 0.5rem 0.7rem;
+    padding: 0.4rem 0.55rem;
   }
   .loc-row input[type="text"].correct { border-color: #28a745; background: #f6fff8; }
 
   .loc-row input[type="radio"] { cursor: pointer; accent-color: #28a745; }
-  .radio-label { font-size: 1rem; cursor: pointer; }
 
-  .loc-hint { font-size: 0.72rem; color: #888; margin-top: 0.5rem; font-weight: 400; }
-  .skip-hint { font-style: italic; }
+  .loc-hint { font-size: 0.72rem; color: #888; font-weight: 400; margin: 0; }
 
-  .toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    cursor: pointer;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #444;
-  }
-  .toggle-label input[type="checkbox"] { cursor: pointer; accent-color: #0066cc; }
-
-  .locations.disabled { opacity: 0.7; }
+  .locations.disabled { opacity: 0.6; pointer-events: none; }
+  .locations.disabled .loc-header { pointer-events: auto; }
 
   .quiz-skip-info {
     font-size: 0.82rem;
@@ -431,8 +477,8 @@
   .modal-footer {
     display: flex;
     justify-content: flex-end;
-    gap: 0.75rem;
-    padding: 1rem 1.5rem;
+    gap: 0.6rem;
+    padding: 0.65rem 1.25rem;
     border-top: 1px solid #f0f2f5;
     flex-shrink: 0;
   }

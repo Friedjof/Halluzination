@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.game import GameStatus
 
@@ -53,6 +53,8 @@ class RoundOut(BaseModel):
     id: int
     original_url: str
     ai_url: str
+    original_filename: Optional[str] = None
+    ai_filename: Optional[str] = None
     solution_text: str
     target_year: Optional[int] = None
     time_limit: int
@@ -70,7 +72,15 @@ class UploadOut(BaseModel):
 # --- Participant ---
 
 class ParticipantJoin(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=32)
+
+    @field_validator("username")
+    @classmethod
+    def strip_and_check(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Username darf nicht leer sein")
+        return v
 
 
 class ParticipantOut(BaseModel):

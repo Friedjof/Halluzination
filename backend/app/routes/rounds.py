@@ -2,7 +2,9 @@ import asyncio
 import os
 import uuid as _uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,8 +17,30 @@ from app.models.round import Round
 from app.schemas import LocationOut, RoundCreate, RoundOut, RoundUpdate, UploadOut
 
 router = APIRouter(prefix="/api/games", tags=["rounds"])
+limiter = Limiter(key_func=get_remote_address)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Allowed image types identified by magic bytes
+_IMAGE_SIGNATURES: list[tuple[bytes, int, bytes, str]] = [
+    # (prefix, offset, marker_at_offset, extension)
+    (b"\xff\xd8\xff", 0, b"", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", 0, b"", ".png"),
+    (b"GIF87a", 0, b"", ".gif"),
+    (b"GIF89a", 0, b"", ".gif"),
+    (b"RIFF", 0, b"WEBP", ".webp"),  # bytes 8-11 must be WEBP
+]
+
+
+def _detect_image_ext(content: bytes) -> str | None:
+    """Return the canonical extension if content is a known image type, else None."""
+    for prefix, _, marker, ext in _IMAGE_SIGNATURES:
+        if not content.startswith(prefix):
+            continue
+        if marker and content[8 : 8 + len(marker)] != marker:
+            continue
+        return ext
+    return None
 
 
 def _write_file(path: str, content: bytes) -> None:
@@ -72,7 +96,9 @@ async def create_round(uuid: str, body: RoundCreate, db: AsyncSession = Depends(
 
 
 @router.post("/{uuid}/rounds/{round_id}/upload", response_model=UploadOut, dependencies=[Depends(require_admin)])
+@limiter.limit("30/minute")
 async def upload_images(
+    request: Request,
     uuid: str,
     round_id: int,
     original: UploadFile = File(...),
@@ -87,7 +113,9 @@ async def upload_images(
         content = await file.read()
         if len(content) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail=f"{label} exceeds 10 MB limit")
-        ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+        ext = _detect_image_ext(content)
+        if ext is None:
+            raise HTTPException(status_code=415, detail=f"{label}: nur JPEG, PNG, GIF und WebP sind erlaubt")
         filename = f"{_uuid.uuid4().hex}_{label}{ext}"
         path = os.path.join(settings.upload_dir, filename)
         await asyncio.to_thread(_write_file, path, content)
@@ -98,6 +126,8 @@ async def upload_images(
 
     r.original_url = original_url
     r.ai_url = ai_url
+    r.original_filename = original.filename or None
+    r.ai_filename = ai.filename or None
     await db.commit()
 
     return UploadOut(original_url=original_url, ai_url=ai_url)

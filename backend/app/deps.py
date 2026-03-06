@@ -1,3 +1,4 @@
+import hmac
 from typing import AsyncGenerator
 
 from fastapi import Header, HTTPException
@@ -13,5 +14,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def require_admin(x_admin_token: str = Header(...)) -> None:
-    if x_admin_token != settings.admin_token:
+    if not hmac.compare_digest(x_admin_token, settings.admin_token):
         raise HTTPException(status_code=401, detail="Invalid admin token")

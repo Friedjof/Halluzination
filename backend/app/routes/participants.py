@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,10 +10,12 @@ from app.models.participant import Participant
 from app.schemas import ParticipantJoin, ParticipantJoinOut, ParticipantOut, ScoreUpdate
 
 router = APIRouter(prefix="/api/games", tags=["participants"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("/{uuid}/join", response_model=ParticipantJoinOut)
-async def join_game(uuid: str, body: ParticipantJoin, db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def join_game(request: Request, uuid: str, body: ParticipantJoin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Game).where(Game.uuid == uuid))
     game = result.scalar_one_or_none()
     if not game:

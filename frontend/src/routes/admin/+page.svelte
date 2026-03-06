@@ -3,10 +3,41 @@
   import { api } from '$lib/api';
   import { adminToken } from '$lib/stores/auth';
 
+  const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+
   let tokenInput = '';
   let gameTitle = '';
   let error = '';
   let loading = false;
+
+  let importFile: File | null = null;
+  let importing = false;
+  let importError = '';
+
+  async function importGame() {
+    if (!importFile) return;
+    importing = true;
+    importError = '';
+    try {
+      const fd = new FormData();
+      fd.append('file', importFile);
+      const res = await fetch(`${BASE}/api/games/import`, {
+        method: 'POST',
+        headers: { 'X-Admin-Token': $adminToken },
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: 'Import fehlgeschlagen' }));
+        throw new Error(body.detail ?? 'Import fehlgeschlagen');
+      }
+      const data = await res.json();
+      goto(`/admin/${data.uuid}`);
+    } catch (e: any) {
+      importError = e.message;
+    } finally {
+      importing = false;
+    }
+  }
 
   async function login() {
     error = '';
@@ -80,6 +111,31 @@
           {loading ? 'Erstelle…' : 'Spiel erstellen →'}
         </button>
       </form>
+
+      <div class="divider"><span>oder</span></div>
+
+      <div class="import-area">
+        <p class="import-label">Spiel importieren</p>
+        <label class="import-file-label">
+          <input
+            type="file"
+            accept=".zip"
+            on:change={(e) => importFile = (e.target as HTMLInputElement).files?.[0] ?? null}
+            hidden
+          />
+          <span class="import-file-btn">
+            {importFile ? importFile.name : '📦 ZIP-Datei auswählen…'}
+          </span>
+        </label>
+        {#if importError}<p class="error">{importError}</p>{/if}
+        <button
+          class="btn-import"
+          disabled={importing || !importFile}
+          on:click={importGame}
+        >
+          {importing ? 'Importiere…' : '⬆ Importieren'}
+        </button>
+      </div>
     </div>
   {/if}
 </div>
@@ -141,6 +197,67 @@
   }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   button:not(:disabled):hover { opacity: 0.85; }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.25rem 0 0;
+    color: #bbb;
+    font-size: 0.82rem;
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #e5e7eb;
+  }
+
+  .import-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 1rem;
+  }
+
+  .import-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #444;
+    margin: 0;
+  }
+
+  .import-file-label { cursor: pointer; }
+
+  .import-file-btn {
+    display: block;
+    border: 1.5px dashed #d0d5dd;
+    border-radius: 8px;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.88rem;
+    color: #666;
+    transition: border-color 0.15s, background 0.15s;
+    word-break: break-all;
+  }
+  .import-file-label:hover .import-file-btn {
+    border-color: #0066cc;
+    background: #f0f6ff;
+    color: #0066cc;
+  }
+
+  .btn-import {
+    background: #1a1a2e;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.7rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .btn-import:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-import:not(:disabled):hover { opacity: 0.85; }
 
   .error {
     color: #dc3545;

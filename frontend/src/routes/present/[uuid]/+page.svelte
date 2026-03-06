@@ -29,6 +29,18 @@
 
   let leaderboard: { participant_id: number; username: string; score: number }[] = [];
 
+  type QuizResult = {
+    participant_id: number;
+    username: string;
+    location_correct: boolean;
+    location_name: string | null;
+    year_guess: number | null;
+    year_points: number;
+    points_awarded: number;
+    score: number;
+  };
+  let quizResults: QuizResult[] = [];
+
   // Live participant list shown during lobby
   let lobbyParticipants: { id: number; username: string; ready: boolean }[] = [];
 
@@ -105,6 +117,7 @@
 
     socket.on('quiz_result', (data) => {
       leaderboard = data.leaderboard;
+      quizResults = data.results ?? [];
       originalUrl = resolveUrl(data.original_url);
       aiImageUrl = resolveUrl(data.ai_url);
       solutionText = data.solution_text ?? '';
@@ -137,6 +150,7 @@
       correctLocation = '';
       buzzerName = '';
       leaderboard = [];
+      quizResults = [];
       quizTimeLeft = 0;
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
       lobbyParticipants = lobbyParticipants.map((p) => ({ ...p, ready: false }));
@@ -237,14 +251,55 @@
 
   {:else if phase === 'revealed'}
     <div class="reveal-area">
-      <ImageCompareSlider aiUrl={aiImageUrl} originalUrl={originalUrl} />
-      {#if solutionText || targetYear || correctLocation}
-        <div class="solution">
-          {#if solutionText}<p>{solutionText}</p>{/if}
-          {#if correctLocation}<p>📍 Richtige Location: <strong>{correctLocation}</strong></p>{/if}
-          {#if targetYear}<p class="year">📅 {targetYear}</p>{/if}
+      <div class="reveal-slider">
+        <ImageCompareSlider aiUrl={aiImageUrl} originalUrl={originalUrl} autoReveal={true} />
+      </div>
+      <div class="solution-panel">
+        <!-- Participant guesses -->
+        <div class="guess-area">
+        {#if quizResults.length > 0}
+          <div class="sol-section-heading">Antworten</div>
+          <div class="guess-list">
+            {#each quizResults as r (r.participant_id)}
+              <div class="guess-row">
+                <span class="guess-name">{r.username}</span>
+                <span class="guess-loc" class:loc-correct={r.location_correct} class:loc-wrong={!r.location_correct && r.location_name !== null} class:loc-none={r.location_name === null}>
+                  {#if r.location_name !== null}
+                    {r.location_correct ? '✓' : '✗'} {r.location_name}
+                  {:else}
+                    –
+                  {/if}
+                </span>
+                <span class="guess-year" class:year-best={r.year_points > 0}>
+                  {r.year_guess !== null ? r.year_guess : '–'}
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
         </div>
-      {/if}
+
+        <!-- Solution (pinned to bottom) -->
+        <div class="sol-divider"></div>
+        <div class="solution-block">
+          <div class="sol-section-heading">Auflösung</div>
+          {#if correctLocation}
+            <div class="sol-answer">
+              <span class="sol-answer-label">📍 Location</span>
+              <span class="sol-answer-value">{correctLocation}</span>
+            </div>
+          {/if}
+          {#if targetYear}
+            <div class="sol-answer">
+              <span class="sol-answer-label">📅 Jahr</span>
+              <span class="sol-answer-value sol-answer-year">{targetYear}</span>
+            </div>
+          {/if}
+          {#if solutionText}
+            <p class="sol-text">{solutionText}</p>
+          {/if}
+        </div>
+      </div>
     </div>
 
   {:else if phase === 'final'}
@@ -280,7 +335,8 @@
 
   .screen {
     width: 100vw;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     background: #0a0a1a;
     color: white;
     display: flex;
@@ -395,19 +451,22 @@
   /* Image area */
   .image-area {
     position: relative;
-    width: min(100%, calc((100vh - 5rem) * 16 / 9));
-    aspect-ratio: 16 / 9;
-    border-radius: 16px;
-    overflow: hidden;
-    background: #111;
-    box-shadow: 0 8px 48px rgba(0,0,0,0.7);
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .image-area img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
     display: block;
+    border-radius: 16px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.7);
     transition: filter 0.5s ease;
   }
 
@@ -520,23 +579,157 @@
 
   /* Reveal */
   .reveal-area {
+    flex: 1;
+    min-height: 0;
     width: 100%;
-    max-width: min(100vw, 1400px);
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 1.25rem;
+    align-items: stretch;
+  }
+
+  .reveal-slider {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  /* Fit slider into available space regardless of portrait/landscape */
+  .reveal-slider :global(.compare) {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .solution-panel {
+    min-height: 0;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 1.5rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow: hidden;
+  }
+
+  .guess-area {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .sol-section-heading {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.38);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+
+  .sol-divider {
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin: 0;
+  }
+
+  /* Guess list */
+  .guess-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .guess-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.05);
+  }
+
+  .guess-name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .guess-loc {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .loc-correct { background: rgba(34,197,94,0.2); color: #86efac; }
+  .loc-wrong   { background: rgba(239,68,68,0.2);  color: #fca5a5; }
+  .loc-none    { color: rgba(255,255,255,0.3); }
+
+  .guess-year {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.45);
+    min-width: 2.8rem;
+    text-align: right;
+  }
+  .guess-year.year-best { color: #fde68a; }
+
+  .solution-block {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1.25rem;
-  }
-
-  .solution {
+    gap: 0.65rem;
     text-align: center;
-    font-size: 1.1rem;
-    color: rgba(255,255,255,0.85);
-    max-width: 700px;
-    line-height: 1.55;
   }
 
-  .year { font-size: 1.4rem; font-weight: 800; color: #ffd700; margin-top: 0.25rem; }
+  .sol-answer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+  }
+
+  .sol-answer-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.38);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .sol-answer-value {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: white;
+    line-height: 1.2;
+  }
+
+  .sol-answer-year {
+    font-size: 2.6rem;
+    color: #ffd700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sol-text {
+    font-size: 0.95rem;
+    color: rgba(255,255,255,0.82);
+    line-height: 1.6;
+    margin: 0;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    text-align: center;
+  }
 
   /* Final leaderboard */
   .final-area {

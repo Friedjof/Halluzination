@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 import time
 
@@ -22,6 +23,7 @@ from app.redis_client import (
     get_locked_set,
     get_lobby_ready_count,
     get_lobby_ready_set,
+    get_game_state,
     get_participant_sid,
     get_sid_info,
     is_locked,
@@ -134,6 +136,10 @@ async def handle_join_game(sid, data):
                 response["current_round_id"] = r.id
                 response["ai_image_url"] = r.ai_url
 
+    # Include current game phase so reconnecting players can restore correct UI state
+    present_phase = await get_game_state_field(game_uuid, "present_phase")
+    response["present_phase"] = present_phase  # e.g. "round", "buzzed", "quiz", "revealed", None
+
     # Include current buzzer-sound preference so late joiners/reconnectors are in sync
     buzzer_sound_raw = await get_game_state_field(game_uuid, "buzzer_sound")
     response["buzzer_sound_enabled"] = buzzer_sound_raw != "0"
@@ -210,13 +216,40 @@ async def handle_join_present(sid, data):
 @sio.on("join_admin")
 async def handle_join_admin(sid, data):
     """Admin joins the admin room. data: {game_uuid, admin_token}"""
-    if data.get("admin_token") != settings.admin_token:
+    if not hmac.compare_digest(data.get("admin_token") or "", settings.admin_token):
         await sio.emit("error", {"message": "Unauthorized"}, to=sid)
         return
     game_uuid = data.get("game_uuid")
     await sio.enter_room(sid, f"game:{game_uuid}")
     await sio.enter_room(sid, f"admin:{game_uuid}")
-    await sio.emit("joined_admin", {"game_uuid": game_uuid}, to=sid)
+
+    # Build state snapshot so the admin panel can restore after a reload
+    state = await get_game_state(game_uuid)
+    current_round_id_str = state.get("current_round_id")
+    present_phase = state.get("present_phase")
+    quiz_ends_at_str = state.get("quiz_ends_at")
+
+    buzzer_winner = None
+    if present_phase == "buzzed" and current_round_id_str:
+        winner_id = await get_buzzer(game_uuid, int(current_round_id_str))
+        if winner_id:
+            async with AsyncSessionLocal() as db:
+                p_result = await db.execute(select(Participant).where(Participant.id == winner_id))
+                p = p_result.scalar_one_or_none()
+                if p:
+                    buzzer_winner = {"id": p.id, "username": p.username}
+
+    quiz_time_left = None
+    if present_phase == "quiz" and quiz_ends_at_str:
+        quiz_time_left = max(0, int(quiz_ends_at_str) - int(time.time()))
+
+    await sio.emit("joined_admin", {
+        "game_uuid": game_uuid,
+        "current_round_id": int(current_round_id_str) if current_round_id_str else None,
+        "present_phase": present_phase,
+        "buzzer_winner": buzzer_winner,
+        "quiz_time_left": quiz_time_left,
+    }, to=sid)
     # Send the current participant list so the admin panel is up to date immediately
     await _emit_participants_update(game_uuid, to=sid)
 
@@ -272,6 +305,7 @@ async def handle_buzz(sid, data):
         return
     logger.info("buzz won game=%s round=%s participant=%s", game_uuid, round_id, participant_id)
 
+    await set_game_state(game_uuid, present_phase="buzzed")
     await sio.emit("buzz_confirmed", {"participant_id": participant_id}, to=sid)
     await sio.emit(
         "buzz_received",
@@ -296,7 +330,7 @@ async def handle_admin_action(sid, data):
     data: {game_uuid, admin_token, action, participant_id?, round_id?}
     Actions: correct | wrong | unlock | unlock_all | next_round | reveal | skip | kick | end_game
     """
-    if data.get("admin_token") != settings.admin_token:
+    if not hmac.compare_digest(data.get("admin_token") or "", settings.admin_token):
         await sio.emit("error", {"message": "Unauthorized"}, to=sid)
         return
 
@@ -729,6 +763,8 @@ async def _finalize_quiz(game_uuid: str, round_id: int):
                 "participant_id": resp.participant_id,
                 "username": resp.participant.username,
                 "location_correct": bool(location_pts),
+                "location_name": resp.selected_location.name if resp.selected_location else None,
+                "year_guess": resp.year_guess,
                 "year_points": year_pts,
                 "points_awarded": total,
                 "score": resp.participant.score,
@@ -746,6 +782,8 @@ async def _finalize_quiz(game_uuid: str, round_id: int):
                     "participant_id": p.id,
                     "username": p.username,
                     "location_correct": False,
+                    "location_name": None,
+                    "year_guess": None,
                     "year_points": 0,
                     "points_awarded": 0,
                     "score": p.score,

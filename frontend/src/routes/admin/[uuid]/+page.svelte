@@ -60,7 +60,7 @@
     });
 
     lobbySocket.on('game_started', () => {
-      window.open(`/present/${uuid}`, '_blank');
+      window.open(`/present/${uuid}`, `present-${uuid}`);
       goto(`/admin/${uuid}/master`);
     });
   });
@@ -163,13 +163,42 @@
   }
 
   let copied = false;
+  let exporting = false;
+  let exportError = '';
+
+  const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
+
+  async function exportGame() {
+    exporting = true;
+    exportError = '';
+    try {
+      const res = await fetch(`${BASE}/api/games/${uuid}/export`, {
+        headers: { 'X-Admin-Token': $adminToken },
+      });
+      if (!res.ok) throw new Error('Export fehlgeschlagen');
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const nameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = nameMatch?.[1] ?? `halluzination_${uuid}_export.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      exportError = e.message;
+    } finally {
+      exporting = false;
+    }
+  }
 
   async function startGame() {
     if (!game) return;
     try {
       await api.post(`/api/games/${uuid}/start`);
       game = { ...game, status: 'active' };
-      window.open(`/present/${uuid}`, '_blank');
+      window.open(`/present/${uuid}`, `present-${uuid}`);
       goto(`/admin/${uuid}/master`);
     } catch (e: any) {
       error = e.message;
@@ -191,11 +220,17 @@
       </span>
     </div>
 
-    {#if game.status === 'lobby'}
-      <button class="btn-start" on:click={startGame}>▶ Spiel starten</button>
-    {:else if game.status === 'active'}
-      <button class="btn-resume" on:click={() => { window.open(`/present/${uuid}`, '_blank'); goto(`/admin/${uuid}/master`); }}>▶ Zum Spielpanel</button>
-    {/if}
+    <div class="top-actions">
+      <button class="btn-export" on:click={exportGame} disabled={exporting} title="Spiel exportieren (ZIP)">
+        {exporting ? '…' : '⬇ Export'}
+      </button>
+      {#if game.status === 'lobby'}
+        <button class="btn-start" on:click={startGame}>▶ Spiel starten</button>
+      {:else if game.status === 'active'}
+        <button class="btn-resume" on:click={() => { window.open(`/present/${uuid}`, `present-${uuid}`); goto(`/admin/${uuid}/master`); }}>▶ Zum Spielpanel</button>
+      {/if}
+    </div>
+    {#if exportError}<p class="export-error">{exportError}</p>{/if}
   </div>
 
   <!-- Setup guide -->
@@ -248,14 +283,13 @@
   <!-- Rounds -->
   <div class="rounds-header">
     <h2>Runden ({game.rounds.length})</h2>
-    {#if game.status === 'lobby'}
-      <button class="btn-add" on:click={openCreate}>+ Neue Runde</button>
-    {/if}
+    <button class="btn-add" on:click={openCreate}>+ Neue Runde</button>
   </div>
 
   {#if game.rounds.length === 0}
     <div class="empty">
-      <p>Noch keine Runden angelegt. Füge die erste Runde hinzu!</p>
+      <p>Noch keine Runden angelegt.</p>
+      <button class="btn-add" on:click={openCreate}>+ Erste Runde hinzufügen</button>
     </div>
   {:else}
     <div class="rounds-list" bind:this={listEl} use:initSortable>
@@ -327,6 +361,33 @@
   .status-lobby { background: #fef3cd; color: #856404; }
   .status-active { background: #d1fae5; color: #065f46; }
   .status-finished { background: #f0f2f5; color: #666; }
+
+  .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .btn-export {
+    background: #f0f2f5;
+    color: #444;
+    border: 1.5px solid #d0d5dd;
+    border-radius: 8px;
+    padding: 0.55rem 1rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-export:hover:not(:disabled) { background: #e0e3e8; }
+  .btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .export-error {
+    font-size: 0.82rem;
+    color: #dc3545;
+    margin: -0.75rem 0 0;
+    text-align: right;
+  }
 
   .btn-start {
     background: #28a745;
@@ -548,6 +609,10 @@
     text-align: center;
     color: #888;
     border: 2px dashed #e0e3e8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
   }
 
 </style>

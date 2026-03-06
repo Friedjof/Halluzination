@@ -8,6 +8,8 @@ export interface Round {
   id: number;
   original_url: string;
   ai_url: string;
+  original_filename?: string | null;
+  ai_filename?: string | null;
   solution_text: string;
   target_year: number | null;
   time_limit: number;

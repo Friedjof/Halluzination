@@ -123,7 +123,13 @@
   }
 
   onMount(() => {
-    socket.on('connect', () => { disconnected = false; });
+    socket.on('connect', () => {
+      disconnected = false;
+      // Re-register SID mapping after any reconnect
+      if (participantId) {
+        socket.emit('join_game', { game_uuid: uuid, participant_id: participantId });
+      }
+    });
     socket.on('disconnect', () => { disconnected = true; });
 
     socket.on('buzzer_sound', (data) => {
@@ -131,10 +137,22 @@
     });
 
     socket.on('joined', (data) => {
-      if (data.buzzer_sound_enabled === false) buzzerSoundEnabled = false;
+      buzzerSoundEnabled = data.buzzer_sound_enabled !== false;
       if (data.current_round_id) {
         currentRoundId = data.current_round_id;
-        phase = data.locked ? 'locked' : 'waiting';
+        const pp: string | null = data.present_phase ?? null;
+        if (pp === 'quiz') {
+          // Quiz already running but we have no locations — mark as submitted so timer can't fire
+          quizSubmitted = true;
+          phase = 'quiz_done';
+        } else if (pp === 'result' || pp === 'revealed') {
+          phase = 'waiting_next';
+        } else if (pp === 'buzzed') {
+          phase = data.locked ? 'locked' : 'other_buzzed';
+        } else {
+          // 'round' or unknown
+          phase = data.locked ? 'locked' : 'waiting';
+        }
       } else {
         phase = 'lobby';
       }
@@ -226,7 +244,13 @@
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
     });
 
+    socket.on('score_update', (data) => {
+      if (data?.leaderboard?.length) leaderboard = data.leaderboard;
+    });
+
     socket.on('round_end', () => {
+      if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
+      quizSubmitted = true; // prevent late auto-submit after skip
       if (phase !== 'result') phase = 'waiting_next';
     });
 
@@ -238,6 +262,20 @@
 
     socket.on('game_reset', () => {
       if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
+      currentRoundId = null;
+      buzzerWinner = '';
+      quizLocations = [];
+      quizTimeLimit = 0;
+      quizTimeLeft = 0;
+      selectedLocationId = null;
+      yearGuess = '';
+      quizSubmitted = false;
+      myPoints = 0;
+      myScore = 0;
+      myLocationCorrect = false;
+      targetYear = null;
+      correctLocation = '';
+      leaderboard = [];
       lobbyReady = false;
       phase = 'lobby';
     });
@@ -281,6 +319,7 @@
     socket.off('participants_update');
     socket.off('quiz_start');
     socket.off('quiz_result');
+    socket.off('score_update');
     socket.off('round_end');
     socket.off('game_reset');
     socket.off('game_end');
@@ -336,7 +375,7 @@
       {:else}
         <p class="ready-hint">Drücke den Buzzer um zu bestätigen, dass du bereit bist</p>
         <button class="buzzer-btn ready-buzzer" on:click={signalReady} on:touchstart|preventDefault={signalReady}>
-          BEREIT!
+          ICH BIN<br>BEREIT!
         </button>
       {/if}
     </div>
@@ -345,6 +384,17 @@
   {:else if phase === 'waiting'}
     <div class="buzzer-screen">
       <p class="round-hint">Runde läuft – wer weiß es?</p>
+      {#if leaderboard.length > 0}
+        <div class="mini-lb">
+          {#each leaderboard as p, i}
+            <div class="mini-lb-row" class:me={p.username === username}>
+              <span class="mini-rank">{i + 1}</span>
+              <span class="mini-name">{p.username}</span>
+              <span class="mini-pts">{p.score}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <button class="buzzer-btn" on:click={buzz} on:touchstart|preventDefault={buzz}>
         BUZZ!
       </button>
@@ -354,6 +404,17 @@
   {:else if phase === 'buzzed'}
     <div class="buzzer-screen">
       <p class="round-hint">Du hast gebuzzert</p>
+      {#if leaderboard.length > 0}
+        <div class="mini-lb">
+          {#each leaderboard as p, i}
+            <div class="mini-lb-row" class:me={p.username === username}>
+              <span class="mini-rank">{i + 1}</span>
+              <span class="mini-name">{p.username}</span>
+              <span class="mini-pts">{p.score}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <button class="buzzer-btn locked" disabled>BUZZ!</button>
       <p class="state-title">Du bist dran!</p>
       <p class="hint">Der Spielleiter entscheidet…</p>
@@ -363,6 +424,17 @@
   {:else if phase === 'other_buzzed'}
     <div class="buzzer-screen">
       <p class="round-hint"><strong>{buzzerWinner}</strong> hat gebuzzert</p>
+      {#if leaderboard.length > 0}
+        <div class="mini-lb">
+          {#each leaderboard as p, i}
+            <div class="mini-lb-row" class:me={p.username === username}>
+              <span class="mini-rank">{i + 1}</span>
+              <span class="mini-name">{p.username}</span>
+              <span class="mini-pts">{p.score}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <button class="buzzer-btn locked" disabled>BUZZ!</button>
       <p class="hint">Warte auf die Entscheidung des Spielleiters</p>
     </div>
@@ -371,6 +443,17 @@
   {:else if phase === 'locked'}
     <div class="buzzer-screen">
       <p class="round-hint">Falsch gebuzzert</p>
+      {#if leaderboard.length > 0}
+        <div class="mini-lb">
+          {#each leaderboard as p, i}
+            <div class="mini-lb-row" class:me={p.username === username}>
+              <span class="mini-rank">{i + 1}</span>
+              <span class="mini-name">{p.username}</span>
+              <span class="mini-pts">{p.score}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <button class="buzzer-btn locked" disabled>BUZZ!</button>
       <p class="hint">Für diese Runde gesperrt</p>
     </div>
@@ -841,6 +924,52 @@
   .lb-rank { color: rgba(255,255,255,0.35); width: 1.5rem; font-weight: 600; }
   .lb-name { flex: 1; }
   .lb-score { font-weight: 700; }
+
+  /* Mini leaderboard above buzzer */
+  .mini-lb {
+    width: 100%;
+    max-width: 280px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 0.5rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .mini-lb-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.55);
+    padding: 0.15rem 0;
+  }
+  .mini-lb-row.me {
+    color: #60d394;
+    font-weight: 700;
+  }
+
+  .mini-rank {
+    width: 1.2rem;
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.3);
+    flex-shrink: 0;
+  }
+  .mini-lb-row.me .mini-rank { color: #60d394; }
+
+  .mini-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mini-pts {
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
 
   .disconnect-banner {
     position: fixed;

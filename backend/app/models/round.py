@@ -11,6 +11,8 @@ class Round(Base):
     game_uuid: Mapped[str] = mapped_column(ForeignKey("games.uuid", ondelete="CASCADE"))
     original_url: Mapped[str] = mapped_column(String(500))
     ai_url: Mapped[str] = mapped_column(String(500))
+    original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ai_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     solution_text: Mapped[str] = mapped_column(Text)
     target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     time_limit: Mapped[int] = mapped_column(Integer, default=20)
