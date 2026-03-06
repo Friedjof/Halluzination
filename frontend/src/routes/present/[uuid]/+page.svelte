@@ -37,6 +37,18 @@
     QRCode.toCanvas(qrCanvas, game.join_url, { width: 300, margin: 2 }).catch(() => {});
   }
 
+  function getRank(lb: { score: number }[], index: number): number {
+    return lb.filter(p => p.score > lb[index].score).length + 1;
+  }
+
+  function rankLabel(lb: { score: number }[], index: number): string {
+    const r = getRank(lb, index);
+    if (r === 1) return '🥇';
+    if (r === 2) return '🥈';
+    if (r === 3) return '🥉';
+    return `#${r}`;
+  }
+
   function resolveUrl(url: string | null | undefined): string {
     if (!url) return '';
     return url.startsWith('http') ? url : `${BACKEND}${url}`;
@@ -215,7 +227,7 @@
       <div class="leaderboard">
         {#each leaderboard as p, i}
           <div class="lb-row">
-            <span class="lb-rank">#{i + 1}</span>
+            <span class="lb-rank">#{getRank(leaderboard, i)}</span>
             <span class="lb-name">{p.username}</span>
             <span class="lb-score">{p.score} Pkt</span>
           </div>
@@ -243,16 +255,14 @@
           {@const maxScore = leaderboard[0]?.score || 1}
           {@const pct = Math.max(6, (p.score / maxScore) * 100)}
           <div class="bar-row" style="animation-delay: {i * 80}ms">
-            <span class="bar-rank">
-              {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
-            </span>
+            <span class="bar-rank">{rankLabel(leaderboard, i)}</span>
             <span class="bar-name">{p.username}</span>
             <div class="bar-track">
               <div
                 class="bar-fill"
-                class:gold={i === 0}
-                class:silver={i === 1}
-                class:bronze={i === 2}
+                class:gold={getRank(leaderboard, i) === 1}
+                class:silver={getRank(leaderboard, i) === 2}
+                class:bronze={getRank(leaderboard, i) === 3}
                 style="width: {pct}%"
               ></div>
             </div>
