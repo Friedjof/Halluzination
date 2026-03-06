@@ -111,6 +111,13 @@
   }
 
   // Inline score editing
+  let buzzerSoundEnabled = true;
+
+  function toggleBuzzerSound() {
+    buzzerSoundEnabled = !buzzerSoundEnabled;
+    emit('set_buzzer_sound', { enabled: buzzerSoundEnabled });
+  }
+
   let editingScoreId: number | null = null;
   let editingScoreValue = '';
 
@@ -408,6 +415,9 @@
             </button>
             <button class="btn-secondary span2" on:click={unlockAll} disabled={!currentRound}>
               🔓 Alle entsperren
+            </button>
+            <button class="btn-sound span2" class:sound-off={!buzzerSoundEnabled} on:click={toggleBuzzerSound}>
+              {buzzerSoundEnabled ? '🔔 Buzzer-Sound an' : '🔕 Buzzer-Sound aus'}
             </button>
           </div>
         </div>
@@ -796,6 +806,25 @@
   .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .span2 { grid-column: 1 / -1; }
+
+  .btn-sound {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    transition: background 0.15s;
+  }
+  .btn-sound:hover { background: #c8e6c9; }
+  .btn-sound.sound-off { background: #fce4ec; color: #b71c1c; border-color: #ef9a9a; }
+  .btn-sound.sound-off:hover { background: #f8bbd0; }
 
   /* Shortcuts */
   .shortcuts { background: #f8f9fa; }

@@ -54,7 +54,10 @@
   let disconnected = false;
 
   // Sound
+  let buzzerSoundEnabled = true;
+
   function playBuzzer() {
+    if (!buzzerSoundEnabled) return;
     const audio = new Audio('/buzzer.mp3');
     audio.play().catch(() => {});
   }
@@ -99,21 +102,19 @@
   function signalReady() {
     if (lobbyReady || !participantId) return;
     lobbyReady = true;
-    socket.emit('lobby_ready', { game_uuid: uuid, participant_id: participantId });
+    socket.emit('lobby_ready', {});
   }
 
   function buzz() {
     if (phase !== 'waiting' || !participantId || !currentRoundId) return;
-    socket.emit('buzz', { game_uuid: uuid, participant_id: participantId, round_id: currentRoundId });
+    socket.emit('buzz', { round_id: currentRoundId });
   }
 
   function submitQuiz() {
     if (!participantId || !currentRoundId || quizSubmitted) return;
     quizSubmitted = true;
     socket.emit('quiz_answer', {
-      game_uuid: uuid,
       round_id: currentRoundId,
-      participant_id: participantId,
       location_id: selectedLocationId ?? undefined,
       year_guess: yearGuess ? parseInt(yearGuess) : undefined,
     });
@@ -125,7 +126,12 @@
     socket.on('connect', () => { disconnected = false; });
     socket.on('disconnect', () => { disconnected = true; });
 
+    socket.on('buzzer_sound', (data) => {
+      buzzerSoundEnabled = data.enabled;
+    });
+
     socket.on('joined', (data) => {
+      if (data.buzzer_sound_enabled === false) buzzerSoundEnabled = false;
       if (data.current_round_id) {
         currentRoundId = data.current_round_id;
         phase = data.locked ? 'locked' : 'waiting';
@@ -264,6 +270,7 @@
   onDestroy(() => {
     if (quizTimer) clearInterval(quizTimer);
     socket.off('connect');
+    socket.off('buzzer_sound');
     socket.off('disconnect');
     socket.off('joined');
     socket.off('round_start');

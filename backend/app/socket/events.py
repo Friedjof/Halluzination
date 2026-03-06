@@ -134,6 +134,10 @@ async def handle_join_game(sid, data):
                 response["current_round_id"] = r.id
                 response["ai_image_url"] = r.ai_url
 
+    # Include current buzzer-sound preference so late joiners/reconnectors are in sync
+    buzzer_sound_raw = await get_game_state_field(game_uuid, "buzzer_sound")
+    response["buzzer_sound_enabled"] = buzzer_sound_raw != "0"
+
     logger.info("join_game game=%s participant_id=%s", game_uuid, participant_id)
     await sio.emit("joined", response, to=sid)
 
@@ -219,13 +223,12 @@ async def handle_join_admin(sid, data):
 
 @sio.on("lobby_ready")
 async def handle_lobby_ready(sid, data):
-    """Participant signals ready in lobby. data: {game_uuid, participant_id}"""
-    game_uuid = data.get("game_uuid")
-    participant_id = data.get("participant_id")
-    if not game_uuid or not participant_id:
+    """Participant signals ready in lobby."""
+    info = await get_sid_info(sid)
+    if not info:
         return
-
-    participant_id = int(participant_id)
+    game_uuid = info["game_uuid"]
+    participant_id = int(info["participant_id"])
     await mark_lobby_ready(game_uuid, participant_id)
 
     # Broadcast updated list (ready flag changed) to the whole room
@@ -239,9 +242,12 @@ async def handle_lobby_ready(sid, data):
 
 @sio.on("buzz")
 async def handle_buzz(sid, data):
-    """data: {game_uuid, participant_id, round_id}"""
-    game_uuid = data.get("game_uuid")
-    participant_id = int(data.get("participant_id", 0))
+    """data: {round_id}"""
+    info = await get_sid_info(sid)
+    if not info:
+        return
+    game_uuid = info["game_uuid"]
+    participant_id = int(info["participant_id"])
     round_id = int(data.get("round_id", 0))
 
     # Validate participant exists and belongs to this game
@@ -317,6 +323,8 @@ async def handle_admin_action(sid, data):
         await _handle_kick(game_uuid, participant_id)
     elif action == "set_score":
         await _handle_set_score(game_uuid, participant_id, data.get("score"))
+    elif action == "set_buzzer_sound":
+        await _handle_set_buzzer_sound(game_uuid, data.get("enabled", True))
     elif action == "reset_game":
         await _handle_reset_game(game_uuid)
     elif action == "end_game":
@@ -536,6 +544,12 @@ async def _handle_kick(game_uuid: str, participant_id: int):
     await _emit_participants_update(game_uuid)
 
 
+async def _handle_set_buzzer_sound(game_uuid: str, enabled: bool) -> None:
+    logger.info("set_buzzer_sound game=%s enabled=%s", game_uuid, enabled)
+    await set_game_state(game_uuid, buzzer_sound=1 if enabled else 0)
+    await sio.emit("buzzer_sound", {"enabled": enabled}, room=f"game:{game_uuid}")
+
+
 async def _handle_set_score(game_uuid: str, participant_id: int, score) -> None:
     if score is None:
         return
@@ -635,10 +649,13 @@ async def _handle_end_game(game_uuid: str):
 
 @sio.on("quiz_answer")
 async def handle_quiz_answer(sid, data):
-    """data: {game_uuid, round_id, participant_id, location_id?, year_guess?}"""
-    game_uuid = data.get("game_uuid")
+    """data: {round_id, location_id?, year_guess?}"""
+    info = await get_sid_info(sid)
+    if not info:
+        return
+    game_uuid = info["game_uuid"]
+    participant_id = int(info["participant_id"])
     round_id = int(data.get("round_id", 0))
-    participant_id = int(data.get("participant_id", 0))
     location_id = data.get("location_id")
     year_guess = data.get("year_guess")
 
