@@ -49,7 +49,7 @@
     locations = locations.map((l, idx) => ({ ...l, is_correct: idx === i }));
   }
 
-  $: yearValid = targetYear === '' || (Number(targetYear) > 1800 && Number(targetYear) <= new Date().getFullYear() + 1);
+  $: yearValid = targetYear === '' || (Number(targetYear) >= 0 && Number(targetYear) <= new Date().getFullYear() + 1);
   $: locationsValid = !useLocations || (locations.every((l) => l.name.trim() !== '') && locations.some((l) => l.is_correct));
   $: isValid =
     solutionText.trim() !== '' &&
@@ -185,7 +185,7 @@
           <input
             type="number"
             bind:value={targetYear}
-            min="1800"
+            min="0"
             max={new Date().getFullYear() + 1}
             placeholder="z.B. 2019"
             class:invalid={!yearValid && targetYear !== ''}

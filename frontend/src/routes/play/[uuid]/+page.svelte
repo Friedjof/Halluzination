@@ -485,7 +485,7 @@
         type="number"
         bind:value={yearGuess}
         placeholder="z. B. 1987"
-        min="1800"
+        min="0"
         max="2030"
       />
 
