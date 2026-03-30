@@ -711,6 +711,21 @@ async def handle_quiz_answer(sid, data):
         db.add(response)
         await db.commit()
 
+        # Early finish: if all participants have answered, cancel the timer and finalize now
+        total = (await db.execute(
+            select(func.count(Participant.id)).where(Participant.game_uuid == game_uuid)
+        )).scalar_one()
+
+        answered = (await db.execute(
+            select(func.count(QuizResponse.id)).where(QuizResponse.round_id == round_id)
+        )).scalar_one()
+
+        if answered >= total:
+            key = f"{game_uuid}:{round_id}"
+            if key in _quiz_tasks:
+                _quiz_tasks[key].cancel()
+            asyncio.create_task(_finalize_quiz(game_uuid, round_id))
+
 
 async def _close_quiz_after(game_uuid: str, round_id: int, delay: int):
     try:
